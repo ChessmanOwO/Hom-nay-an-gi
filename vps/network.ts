@@ -1,0 +1,3 @@
+import {isIP} from 'node:net';
+export function normalizeIp(raw:string|undefined|null){if(!raw||!isIP(raw))return null;let ip=isIP(raw)===6?new URL('http://['+raw+']').hostname.slice(1,-1).toLowerCase():raw;if(ip.startsWith('::ffff:')){const parts=ip.slice(7).split(':');if(parts.length===2){const n=parseInt(parts[0],16)*65536+parseInt(parts[1],16);ip=[n>>>24,(n>>>16)&255,(n>>>8)&255,n&255].join('.')}}return ip}
+export function clientIp(remote:string|undefined,headers:Headers,trusted:string[]){const peer=normalizeIp(remote);if(!peer)return null;let ip=peer;if(trusted.map(normalizeIp).includes(peer))ip=normalizeIp(headers.get('x-real-ip'))||peer;if(ip==='::1'||ip.startsWith('127.')||ip==='0.0.0.0'||ip==='::')return null;return ip}

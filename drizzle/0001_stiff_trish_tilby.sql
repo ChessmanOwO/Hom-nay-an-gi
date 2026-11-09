@@ -1,0 +1,1 @@
+ALTER TABLE `reviews` ADD `front` text DEFAULT '' NOT NULL;

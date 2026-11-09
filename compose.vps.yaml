@@ -1,0 +1,56 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.vps
+    env_file: .env.vps
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_HOST: 0.0.0.0
+      DATA_DIR: /data
+      DATABASE_URL: postgresql://hnag:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/hnag
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - app_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - private_app
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: hnag
+      POSTGRES_DB: hnag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hnag -d hnag"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+    networks:
+      - private_app
+volumes:
+  pg_data:
+  app_data:
+networks:
+  private_app:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+          gateway: 172.29.0.1

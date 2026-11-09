@@ -1,0 +1,1 @@
+CREATE INDEX `place_public_reviews` ON `place_reviews` (`restaurant`,`status`,`updated`);

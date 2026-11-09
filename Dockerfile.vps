@@ -1,0 +1,17 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package*.json .npmrc ./
+RUN npm ci --include=dev --no-audit --no-fund
+COPY . .
+RUN npm run build:vps
+
+FROM node:24-bookworm-slim
+ENV NODE_ENV=production APP_HOST=0.0.0.0 APP_PORT=3000 DATA_DIR=/data
+WORKDIR /app
+COPY package*.json .npmrc ./
+RUN npm ci --omit=dev --no-audit --no-fund && useradd --uid 10001 --create-home appuser && mkdir /data && chown appuser:appuser /data
+COPY --from=build --chown=appuser:appuser /app/vps/dist ./vps/dist
+COPY --chown=appuser:appuser scripts/account-access.mjs ./scripts/account-access.mjs
+USER appuser
+EXPOSE 3000
+CMD ["node","vps/dist/server.mjs"]

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `one_report_per_target` ON `reports` (`owner`,`target`);

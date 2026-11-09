@@ -1,0 +1,3 @@
+'use client';
+import {Camera,MapPin,UtensilsCrossed,ArrowUpRight} from 'lucide-react';
+export default function CommunityNote({post}:{post:()=>void}){return <section className="community-note"><div className="community-number">01<span>món ngon</span></div><div><h2>Quán quen của bạn,<br/>có thể là khám phá mới của ai đó.</h2><p>Kể thật về hương vị. Ghi đúng giá đã trả. Chụp thêm mặt tiền để người sau dễ tìm.</p><button className="text-link" onClick={()=>post()}>Chia sẻ lần ăn gần nhất <ArrowUpRight size={18}/></button></div><div className="note-list"><span><Camera size={20}/> Ảnh tự chụp, nhìn là biết</span><span><MapPin size={20}/> Ghim đúng quán, đến đúng nơi</span><span><UtensilsCrossed size={20}/> Có sao kể vậy, ăn ngon cùng nhau</span></div></section>}

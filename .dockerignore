@@ -1,0 +1,15 @@
+.git
+node_modules
+dist
+.next
+.vinext
+.wrangler
+.sites-runtime
+outputs
+work
+vps/data
+vps/dist
+.env*
+.dev.vars*
+*.log
+*.pem

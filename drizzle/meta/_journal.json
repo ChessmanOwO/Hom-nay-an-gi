@@ -1,0 +1,83 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794041282292,
+      "tag": "0000_tough_tusk",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794041519044,
+      "tag": "0001_stiff_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794042801351,
+      "tag": "0002_lean_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794068119084,
+      "tag": "0003_watery_firestar",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794068635139,
+      "tag": "0004_talented_chamber",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794068877644,
+      "tag": "0005_fat_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794069119225,
+      "tag": "0006_curious_hitman",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794072357325,
+      "tag": "0007_strong_harry_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794153600000,
+      "tag": "0008_place_review_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794153600001,
+      "tag": "0009_catalog_read_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794153600002,
+      "tag": "0010_account_access",
+      "breakpoints": true
+    }
+  ]
+}

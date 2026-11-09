@@ -1,0 +1,15 @@
+import {createHash,randomBytes} from 'node:crypto';
+import type {DatabaseBinding,AppUser} from '../lib/runtime';
+import type {GoogleIdentity} from './firebase-identity';
+const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
+export function sessionCookieName(secure:boolean){return secure?'__Host-hnag_session':'hnag_session'}
+export function readCookie(req:Request,name:string){return req.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1)||''}
+export function cookieValue(token:string,secure:boolean,maxAge:number){return `${sessionCookieName(secure)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.max(0,Math.floor(maxAge))}${secure?'; Secure':''}`}
+export function createSessions(db:DatabaseBinding,secure:boolean){return{
+ async user(req:Request):Promise<AppUser|null>{const token=readCookie(req,sessionCookieName(secure));if(!/^[a-zA-Z0-9_-]{43}$/.test(token))return null;const row=await db.prepare('SELECT u.id,u.email,u.display_name FROM app_sessions s JOIN app_users u ON u.id=s.user_id LEFT JOIN account_access a ON a.google_uid=u.google_uid WHERE COALESCE(a.disabled,0)=0 AND s.hash=? AND s.expires>?').bind(digest(token),Date.now()).first<any>();return row?{userId:row.id,email:row.email,fullName:row.display_name,displayName:row.display_name}:null},
+ async open(req:Request,identity:GoogleIdentity){
+ const access=await db.prepare('SELECT disabled,revoked_before FROM account_access WHERE google_uid=?').bind(identity.uid).first<any>();
+ if(access&&(access.disabled||identity.authTime<=access.revoked_before))return null;
+const now=Date.now(),id='firebase:'+identity.uid,token=randomBytes(32).toString('base64url'),old=readCookie(req,sessionCookieName(secure));const queries=[db.prepare('INSERT INTO app_users(id,google_uid,email,display_name,created,last_login) VALUES(?,?,?,?,?,?) ON CONFLICT(google_uid) DO UPDATE SET email=excluded.email,display_name=excluded.display_name,last_login=excluded.last_login').bind(id,identity.uid,identity.email,identity.name||'Thành viên',now,now)];if(/^[a-zA-Z0-9_-]{43}$/.test(old))queries.push(db.prepare('DELETE FROM app_sessions WHERE hash=?').bind(digest(old)));queries.push(db.prepare('INSERT INTO app_sessions(hash,user_id,expires,created) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM account_access WHERE google_uid=? AND (disabled=1 OR revoked_before>=?))').bind(digest(token),id,identity.expires,now,identity.uid,identity.authTime),db.prepare('DELETE FROM app_sessions WHERE hash IN (SELECT hash FROM app_sessions WHERE expires<=? LIMIT 200)').bind(now));await db.batch(queries);const inserted=await db.prepare('SELECT hash FROM app_sessions WHERE hash=?').bind(digest(token)).first();if(!inserted)return null;return cookieValue(token,secure,(identity.expires-now)/1000)},
+ async close(req:Request){const token=readCookie(req,sessionCookieName(secure));if(/^[a-zA-Z0-9_-]{43}$/.test(token))await db.prepare('DELETE FROM app_sessions WHERE hash=?').bind(digest(token)).run();return cookieValue('',secure,0)}
+}}

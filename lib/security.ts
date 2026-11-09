@@ -1,0 +1,9 @@
+// Strip metadata rather than trusting file names or browser MIME types.
+export function cleanImage(b:Uint8Array):{data:Uint8Array,mime:string}{
+ if(b.length>3_000_000)throw Error('Ảnh tối đa 3 MB sau khi nén.');
+ if(b[0]===255&&b[1]===216){let p=2,parts=[b.slice(0,2)];while(p<b.length){if(b[p]!==255)throw Error('Ảnh JPEG không hợp lệ.');const marker=b[p+1];if(marker===218){if(b[b.length-2]!==255||b[b.length-1]!==217)throw Error('JPEG chưa hoàn chỉnh.');parts.push(b.slice(p));const size=parts.reduce((s,x)=>s+x.length,0),out=new Uint8Array(size);let n=0;for(const x of parts){out.set(x,n);n+=x.length;}return {data:out,mime:'image/jpeg'};}const len=(b[p+2]<<8)|b[p+3];if(len<2||p+2+len>b.length)throw Error('JPEG không hợp lệ.');if(!((marker>=224&&marker<=239)||marker===254))parts.push(b.slice(p,p+len+2));p+=len+2;}throw Error('JPEG không hợp lệ.');}
+ const sig=[137,80,78,71,13,10,26,10];if(sig.every((v,i)=>b[i]===v)){let p=8,parts=[b.slice(0,8)],end=false;while(p+12<=b.length){const len=new DataView(b.buffer,b.byteOffset+p,4).getUint32(0);if(p+12+len>b.length)throw Error('PNG không hợp lệ.');const type=String.fromCharCode(...b.slice(p+4,p+8));if(['IHDR','PLTE','IDAT','IEND','tRNS'].includes(type))parts.push(b.slice(p,p+len+12));p+=len+12;if(type==='IEND'){end=true;break;}}if(!end)throw Error('PNG chưa hoàn chỉnh.');const out=new Uint8Array(parts.reduce((s,x)=>s+x.length,0));let n=0;for(const x of parts){out.set(x,n);n+=x.length;}return {data:out,mime:'image/png'};}
+ throw Error('Chỉ nhận ảnh JPEG hoặc PNG.');
+}
+export function canonical(s:string){return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
+export function haversine(a:number,b:number,c:number,d:number){const r=Math.PI/180,dl=(c-a)*r,dg=(d-b)*r;return 6371*2*Math.asin(Math.sqrt(Math.sin(dl/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(dg/2)**2))}

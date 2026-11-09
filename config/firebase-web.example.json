@@ -1,0 +1,9 @@
+{
+  "apiKey": "AIzaSyYOUR_FIREBASE_API_KEY_HERE",
+  "authDomain": "your-firebase-project.firebaseapp.com",
+  "projectId": "your-firebase-project",
+  "storageBucket": "your-firebase-project.firebasestorage.app",
+  "messagingSenderId": "123456789012",
+  "appId": "1:123456789012:web:abcdef1234567890",
+  "measurementId": "G-XXXXXXXXXX"
+}

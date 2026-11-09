@@ -1,0 +1,1 @@
+ALTER TABLE `place_reviews` DROP COLUMN `video_count`;
