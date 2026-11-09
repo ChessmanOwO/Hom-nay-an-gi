@@ -1,0 +1,63 @@
+name: CI/CD Pipeline - Hôm nay ăn gì
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-and-verify:
+    name: 🧪 Kiểm định & Build kiểm thử
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cài đặt Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Cài đặt dependencies
+        run: npm ci --include=dev --no-audit --no-fund
+
+      - name: Build VPS client & server bundle
+        run: npm run build:vps
+
+      - name: Chạy toàn bộ Unit Tests & Limit Checks
+        run: |
+          npx tsx tests/unit.ts
+          npx tsx tests/place-limit.ts
+          npx tsx tests/abuse.ts
+
+  deploy:
+    name: 🚀 Tự động Deploy lên Azure VM
+    needs: [test-and-verify]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Kết nối SSH và cập nhật ứng dụng trên Azure VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USER }}
+          key: ${{ secrets.AZURE_VM_SSH_KEY }}
+          password: ${{ secrets.AZURE_VM_PASSWORD }}
+          port: ${{ secrets.AZURE_VM_PORT || 22 }}
+          script: |
+            set -e
+            echo "🚀 [CI/CD] Bắt đầu đồng bộ mã nguồn trên Azure VM..."
+            cd ~/Hom-nay-an-gi || cd /home/$USER/Hom-nay-an-gi
+
+            echo "📥 [CI/CD] Kéo code mới nhất từ nhánh main..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "🐳 [CI/CD] Đang build lại Docker container và áp dụng migration..."
+            sudo docker compose --env-file .env.vps -f compose.vps.yaml up -d --build
+
+            echo "🧹 [CI/CD] Dọn dẹp docker images cũ..."
+            sudo docker image prune -f
+
+            echo "✅ [CI/CD] Triển khai thành công 100%! Ứng dụng đã sẵn sàng."
