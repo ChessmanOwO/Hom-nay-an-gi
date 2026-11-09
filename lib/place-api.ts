@@ -8,7 +8,7 @@ export async function placeRead(id:string,p:URLSearchParams,u:any,{one,all,json}
  const sort=p.get('sort')||'media';
  // Sort expressions are allowlisted; ratings never influence priority.
  const order=sort==='newest'?'v.updated DESC,v.id DESC':sort==='helpful'?'helpful DESC,v.updated DESC,v.id DESC':"CASE WHEN v.photo_count>0 THEN 1 ELSE 0 END DESC,helpful DESC,v.updated DESC,v.id DESC";
- const rows=await all(`SELECT v.id,v.author,v.date,v.rating,v.content,v.media,v.sponsored,v.updated,(SELECT COUNT(*) FROM votes WHERE review=v.id) helpful FROM place_reviews v WHERE restaurant=? AND status='approved' ORDER BY ${order} LIMIT ? OFFSET ?`,id,size,(page-1)*size);
+ const rows=await all(`SELECT v.id,v.author,v.owner,v.date,v.rating,v.content,v.media,v.sponsored,v.updated,(SELECT COUNT(*) FROM votes WHERE review=v.id) helpful FROM place_reviews v WHERE restaurant=? AND status='approved' ORDER BY ${order} LIMIT ? OFFSET ?`,id,size,(page-1)*size);
  const mineReviews=u?await all('SELECT * FROM place_reviews WHERE restaurant=? AND owner=? ORDER BY created DESC,id DESC',id,u.userId):[];
  const mine=mineReviews.find((r:any)=>r.status!=='deleted')||mineReviews[0]||null;
  const activeMineCount=mineReviews.filter((r:any)=>r.status!=='deleted').length;

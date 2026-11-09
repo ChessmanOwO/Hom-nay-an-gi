@@ -122,7 +122,7 @@ async function handle(req:Request,method:string){try{
    const id=path[1];
    const item=await one("SELECT o.id,o.restaurant,o.type,o.name,o.category,o.meal,o.vegetarian,o.status,o.created,r.name restaurant_name,r.address,r.city,r.district,r.lat,r.lng,r.hours,r.front FROM offerings o JOIN restaurants r ON r.id=o.restaurant JOIN food_types t ON t.id=o.type WHERE o.id=? AND o.status='approved' AND r.status='active' AND t.status='approved'",id);
    must(item,'Món này chưa công khai hoặc quán đã ngừng hoạt động.');
-   const rr=await all(`SELECT v.id,v.author,v.date,v.total,v.portions,v.people,v.unit,v.rating,v.taste,v.portion,v.value,v.photos,v.sponsored,v.updated,(SELECT COUNT(*) FROM votes WHERE review=v.id) helpful FROM reviews v WHERE offering=? AND status='approved' ORDER BY date DESC,updated DESC`,id);
+   const rr=await all(`SELECT v.id,v.author,v.owner,v.date,v.total,v.portions,v.people,v.unit,v.rating,v.taste,v.portion,v.value,v.photos,v.sponsored,v.updated,(SELECT COUNT(*) FROM votes WHERE review=v.id) helpful FROM reviews v WHERE offering=? AND status='approved' ORDER BY date DESC,updated DESC`,id);
    return json({item,siblings:await filteredCatalog(new URLSearchParams(),undefined,item.restaurant),reviews:rr.map(v=>({...v,photos:JSON.parse(v.photos)})),history:await all("SELECT h.date,h.total,h.portions,h.people,h.unit FROM price_history h JOIN reviews v ON v.id=h.review WHERE v.offering=? AND v.status='approved' ORDER BY h.date DESC LIMIT 40",id)});
   }
   if(path[0]==='photo'){
