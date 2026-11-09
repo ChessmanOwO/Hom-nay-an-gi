@@ -24,6 +24,9 @@ sql.exec('DELETE FROM review_events');
 assert.equal((await call('PATCH',{...body,id:rows[0].id})).status,200);
 assert.equal((await call('PATCH',{...body,id:rows[0].id},'other')).status,400);
 assert.equal((await call('DELETE',{id:rows[0].id})).status,200);
+// Soft-delete restores 1 turn per user requirement
+sql.exec('DELETE FROM review_events');
+assert.equal((await call('POST',body)).status,200);
 assert.equal((await call('POST',body)).status,409);
 assert.equal((await call('PATCH',{...body,id:rows[0].id})).status,400);
 for(let i=0;i<9;i++)seed('race'+i,'race');
@@ -32,13 +35,9 @@ const race=await Promise.all([call('POST',{...body,content:'Race fixture has a s
 assert.deepEqual(race.map(r=>r.status).sort(),[200,409]);
 assert.equal(sql.prepare("SELECT COUNT(*) n FROM place_reviews WHERE owner='race'").get()!.n,10);
 const read=await api(new Request('http://localhost/api/place/r',{headers:{'test-user':'member'}}));const data:any=await read.json();
-assert.equal(data.mineReviews.length,10);assert.equal(data.reviewCount,10);assert.equal(data.reviewLimit,10);
+assert.equal(data.mineReviews.length,11);assert.equal(data.reviewCount,10);assert.equal(data.reviewLimit,10);
 assert.equal((await call('POST',{...body,content:'Independent fixture describes the atmosphere and tables during a different visit.'},'independent')).status,200);
 assert.equal((await call('POST',body,'')).status,401);
 assert.throws(()=>seed('direct11','member'),/PLACE_REVIEW_LIMIT/);
-console.log('PASS migration preservation, posts 1–10, 11 rejected, edit, ownership, soft-delete lifetime cap, parallel boundary, independent user, anonymous, database direct cap and API list.');
+console.log('PASS migration preservation, posts 1–10, 11 rejected, edit, ownership, soft-delete restores 1 turn, parallel boundary, independent user, anonymous, database direct cap and API list.');
 sql.close();
-
-
-
-
