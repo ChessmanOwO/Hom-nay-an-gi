@@ -6,12 +6,109 @@ import FoodMap from '../LazyFoodMap';
 import {Field,StateNote} from '../FormControls';
 import {api,money,unit,photo,date} from '../../lib/client';
 import {POST_CATEGORIES} from '../../lib/discovery';
+import {extractMapsCoords,isShortGoogleMapsUrl} from '../../lib/maps';
+
 function PostForm({data,existing,done,notify,editing,lookupSearch,setLookupSearch}:{data:any,existing?:any,done:()=>void,notify:(s:string)=>void,editing?:any,lookupSearch:string,setLookupSearch:(s:string)=>void}){
- const [f,F]=useState<any>({offering:existing?.id||'',restaurant:existing?.restaurant||'',restaurantName:'',dish:'',typeName:'',address:'',city:'Hà Nội',district:'',lat:'',lng:'',hours:'',category:'Bún / Phở',meal:'Trưa',vegetarian:false,author:data.user?.name||'',date:new Date().toISOString().slice(0,10),total:'',portions:1,people:1,unit:'phan',rating:5,taste:'',portion:'',value:'',sponsored:false,...editing});const [pics,setPics]=useState<string[]>([]),[front,setFront]=useState(''),[uploading,UP]=useState(false),[busy,B]=useState(false),[error,E]=useState('');const set=(k:string,v:any)=>F((o:any)=>({...o,[k]:v}));
+ const [f,F]=useState<any>({offering:existing?.id||'',restaurant:existing?.restaurant||'',restaurantName:'',dish:'',typeName:'',address:'',city:'Hà Nội',district:'',lat:'',lng:'',hours:'',category:'Bún / Phở',meal:'Trưa',vegetarian:false,author:data.user?.name||'',date:new Date().toISOString().slice(0,10),total:'',portions:1,people:1,unit:'phan',rating:5,taste:'',portion:'',value:'',sponsored:false,...editing});
+ const [pics,setPics]=useState<string[]>([]),[front,setFront]=useState(''),[uploading,UP]=useState(false),[busy,B]=useState(false),[error,E]=useState('');
+ const [mapsUrl,setMapsUrl]=useState('');
+ const set=(k:string,v:any)=>F((o:any)=>({...o,[k]:v}));
+
+ async function reverseGeocode(lat:number,lng:number){
+  try{
+   const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+   const a=await r.json();
+   if(a?.address){
+    const road=a.address.road||a.address.pedestrian||a.address.hamlet||'';
+    const num=a.address.house_number||'';
+    const fullRoad=[num,road].filter(Boolean).join(' ');
+    const suburb=a.address.suburb||a.address.quarter||a.address.neighbourhood||a.address.village||'';
+    const district=a.address.district||a.address.city_district||a.address.county||suburb||'';
+    const city=a.address.city||a.address.state||'Hà Nội';
+    F((o:any)=>({
+     ...o,
+     address:o.address||fullRoad||(a.display_name?a.display_name.split(',')[0]:''),
+     district:o.district||district,
+     city:o.city||city
+    }));
+   }
+  }catch{}
+ }
+
+ async function parseMapsLink(){
+  const url=mapsUrl.trim();
+  if(!url)return;
+  B(true);
+  E('');
+  try{
+   let lat:number|undefined;
+   let lng:number|undefined;
+   let name:string|undefined;
+
+   const clientExtracted=extractMapsCoords(url);
+   if(clientExtracted){
+    lat=clientExtracted.lat;
+    lng=clientExtracted.lng;
+    name=clientExtracted.name;
+   }else{
+    const res=await api('resolve-maps','POST',{url});
+    lat=res.lat;
+    lng=res.lng;
+    name=res.name;
+   }
+
+   if(lat!==undefined&&lng!==undefined){
+    F((o:any)=>({
+     ...o,
+     lat:lat!.toFixed(6),
+     lng:lng!.toFixed(6),
+     restaurantName:o.restaurantName||name||o.restaurantName
+    }));
+    await reverseGeocode(lat,lng);
+    notify('Đã lấy vị trí quán từ Google Maps thành công!');
+   }else{
+    throw Error('Không tìm thấy tọa độ trong liên kết này. Hãy thử liên kết đầy đủ hoặc ghim trên bản đồ.');
+   }
+  }catch(err:any){
+   E(err.message||'Không thể trích xuất liên kết Google Maps.');
+  }finally{
+   B(false);
+  }
+ }
+
+ function getCurrentLocation(){
+  if(!navigator.geolocation){
+   notify('Thiết bị hoặc trình duyệt không hỗ trợ định vị GPS.');
+   return;
+  }
+  B(true);
+  E('');
+  navigator.geolocation.getCurrentPosition(
+   async(pos)=>{
+    const lat=pos.coords.latitude;
+    const lng=pos.coords.longitude;
+    F((o:any)=>({
+     ...o,
+     lat:lat.toFixed(6),
+     lng:lng.toFixed(6)
+    }));
+    await reverseGeocode(lat,lng);
+    B(false);
+    notify('Đã lấy vị trí GPS hiện tại của quán!');
+   },
+   (err)=>{
+    B(false);
+    E('Không thể lấy vị trí GPS: '+(err.message||'Hãy cấp quyền vị trí cho trang web.'));
+   },
+   {enableHighAccuracy:true,timeout:10000,maximumAge:0}
+  );
+ }
+
  async function upload(files:FileList|null,isFront=false){if(!files)return;UP(true);E('');try{const ids:string[]=[];for(const file of Array.from(files).slice(0,isFront?1:5-pics.length-(front?1:0))){if(!['image/jpeg','image/png'].includes(file.type)||file.size>15_000_000)throw Error('Chọn ảnh JPEG/PNG tối đa 15 MB.');const img=await createImageBitmap(file),scale=Math.min(1,1600/Math.max(img.width,img.height)),canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d')!.drawImage(img,0,0,canvas.width,canvas.height);img.close();const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Không đọc được ảnh.')),'image/jpeg',.84));const r=await fetch('/api/upload',{method:'POST',body:blob,headers:{'Content-Type':'image/jpeg'}}),d:any=await r.json();if(!r.ok)throw Error(d.error);ids.push(d.id)}if(isFront)setFront(ids[0]||'');else setPics(p=>[...p,...ids])}catch(e:any){E(e.message)}finally{UP(false)}}
  async function geocode(){B(true);try{const q=[f.restaurantName,f.address,f.district,f.city,'Việt Nam'].filter(Boolean).join(', ');const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q));const a:any=await r.json();if(!a.length)throw Error('Chưa tìm thấy. Bạn có thể bấm bản đồ hoặc nhập tọa độ.');set('lat',Number(a[0].lat));set('lng',Number(a[0].lon))}catch(e:any){E(e.message)}finally{B(false)}}
  async function submit(e:React.FormEvent){e.preventDefault();B(true);E('');try{const d=await api('reviews',editing?'PATCH':'POST',editing?f:{...f,photos:[...pics,...(front?[front]:[])],front});notify(d.message);done()}catch(e:any){E(e.message)}finally{B(false)}}
- return <form onSubmit={submit} className="post-form"><StateNote>Bài viết từ trải nghiệm của bạn. Ảnh món ăn tự chụp giúp mọi người lựa chọn; ảnh mặt tiền giúp tìm đúng quán. Nội dung mới và nội dung cập nhật đều được duyệt trước khi công khai.</StateNote>{!editing&&<><h3><span className="step">1</span> Món ăn & địa điểm</h3>{existing?<div className="selected-dish"><strong>{existing.name}</strong><span>{existing.restaurant_name} · {existing.address}</span></div>:<><Field label="Tìm quán đã có"><input value={lookupSearch} onChange={e=>setLookupSearch(e.target.value)} placeholder="Tên quán, địa chỉ hoặc thành phố"/></Field><Field label="Quán bạn đã đến"><select value={f.restaurant} onChange={e=>set('restaurant',e.target.value)}><option value="">+ Đề xuất quán mới</option>{data.restaurants.map((r:any)=><option key={r.id} value={r.id}>{r.name} · {r.address}</option>)}</select></Field>{!f.restaurant&&<><div className="form-grid"><Field label="Tên quán *"><input required maxLength={100} value={f.restaurantName} onChange={e=>set('restaurantName',e.target.value)} placeholder="Ví dụ: Bún chả đầu ngõ"/></Field><Field label="Giờ mở cửa (nếu biết)"><input value={f.hours} onChange={e=>set('hours',e.target.value)} placeholder="Ví dụ: 07:00–14:00; không rõ để trống"/></Field></div><Field label="Địa chỉ quán *"><input required value={f.address} maxLength={250} onChange={e=>set('address',e.target.value)} placeholder="Số nhà, tên đường, phường/xã"/></Field><div className="form-grid"><Field label="Tỉnh / Thành phố *"><input required value={f.city} onChange={e=>set('city',e.target.value)}/></Field><Field label="Quận / Huyện / Khu vực *"><input required value={f.district} onChange={e=>set('district',e.target.value)} placeholder="Ví dụ: Cầu Giấy"/></Field></div><button type="button" className="button secondary" onClick={geocode} disabled={busy}><Search size={16}/> Tìm địa chỉ trên bản đồ</button><FoodMap pin={f.lat!==''&&f.lng!==''?[Number(f.lat),Number(f.lng)]:undefined} onPin={(lat,lng)=>F((o:any)=>({...o,lat:lat.toFixed(6),lng:lng.toFixed(6)}))}/><div className="form-grid"><Field label="Vĩ độ *"><input type="number" step="any" min="-90" max="90" required value={f.lat} onChange={e=>set('lat',e.target.value)}/></Field><Field label="Kinh độ *"><input type="number" step="any" min="-180" max="180" required value={f.lng} onChange={e=>set('lng',e.target.value)}/></Field></div><p className="muted small">Bản đồ và tìm địa chỉ: © OpenStreetMap contributors / Nominatim. Kiểm tra lại ghim trước khi gửi.</p></>}
+
+ return <form onSubmit={submit} className="post-form"><StateNote>Bài viết từ trải nghiệm của bạn. Ảnh món ăn tự chụp giúp mọi người lựa chọn; ảnh mặt tiền giúp tìm đúng quán. Nội dung mới và nội dung cập nhật đều được duyệt trước khi công khai.</StateNote>{!editing&&<><h3><span className="step">1</span> Món ăn & địa điểm</h3>{existing?<div className="selected-dish"><strong>{existing.name}</strong><span>{existing.restaurant_name} · {existing.address}</span></div>:<><Field label="Tìm quán đã có"><input value={lookupSearch} onChange={e=>setLookupSearch(e.target.value)} placeholder="Tên quán, địa chỉ hoặc thành phố"/></Field><Field label="Quán bạn đã đến"><select value={f.restaurant} onChange={e=>set('restaurant',e.target.value)}><option value="">+ Đề xuất quán mới</option>{data.restaurants.map((r:any)=><option key={r.id} value={r.id}>{r.name} · {r.address}</option>)}</select></Field>{!f.restaurant&&<><div className="maps-helper-box" style={{background:'#fff7ed',border:'1px solid #fdba74',borderRadius:'10px',padding:'12px',margin:'12px 0'}}><div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'6px',marginBottom:'8px'}}><strong style={{display:'flex',alignItems:'center',gap:'6px',color:'#c2410c',fontSize:'13px'}}><MapPin size={16}/> Nhập nhanh từ Google Maps hoặc GPS:</strong><button type="button" className="button secondary" onClick={getCurrentLocation} disabled={busy} style={{fontSize:'12px',display:'flex',alignItems:'center',gap:'5px'}}><LocateFixed size={14}/> 📍 Lấy GPS tại quán</button></div><div style={{display:'flex',gap:'6px'}}><input type="url" value={mapsUrl} onChange={e=>setMapsUrl(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();parseMapsLink();}}} placeholder="Dán link Google Maps (maps.app.goo.gl/... hoặc google.com/maps/...)" style={{flex:1,padding:'7px 10px',fontSize:'13px',borderRadius:'6px',border:'1px solid #fdba74',background:'#fff'}}/><button type="button" className="button primary" onClick={parseMapsLink} disabled={busy||!mapsUrl.trim()} style={{whiteSpace:'nowrap',fontSize:'13px'}}>{busy?<LoaderCircle className="spin" size={14}/>:<ArrowUpRight size={14}/>} Trích xuất</button></div><p className="muted small" style={{margin:'6px 0 0 0',fontSize:'11.5px'}}>💡 Mẹo: Vào Google Maps ➔ Tìm quán ➔ Bấm "Chia sẻ" ➔ "Sao chép liên kết" rồi dán vào đây để tự động lấy tọa độ và địa chỉ quán!</p></div><div className="form-grid"><Field label="Tên quán *"><input required maxLength={100} value={f.restaurantName} onChange={e=>set('restaurantName',e.target.value)} placeholder="Ví dụ: Bún chả đầu ngõ"/></Field><Field label="Giờ mở cửa (nếu biết)"><input value={f.hours} onChange={e=>set('hours',e.target.value)} placeholder="Ví dụ: 07:00–14:00; không rõ để trống"/></Field></div><Field label="Địa chỉ quán *"><input required value={f.address} maxLength={250} onChange={e=>set('address',e.target.value)} placeholder="Số nhà, tên đường, phường/xã"/></Field><div className="form-grid"><Field label="Tỉnh / Thành phố *"><input required value={f.city} onChange={e=>set('city',e.target.value)}/></Field><Field label="Quận / Huyện / Khu vực *"><input required value={f.district} onChange={e=>set('district',e.target.value)} placeholder="Ví dụ: Cầu Giấy"/></Field></div><button type="button" className="button secondary" onClick={geocode} disabled={busy}><Search size={16}/> Tìm địa chỉ trên bản đồ</button><FoodMap pin={f.lat!==''&&f.lng!==''?[Number(f.lat),Number(f.lng)]:undefined} onPin={(lat,lng)=>F((o:any)=>({...o,lat:lat.toFixed(6),lng:lng.toFixed(6)}))}/><div className="form-grid"><Field label="Vĩ độ *"><input type="number" step="any" min="-90" max="90" required value={f.lat} onChange={e=>set('lat',e.target.value)}/></Field><Field label="Kinh độ *"><input type="number" step="any" min="-180" max="180" required value={f.lng} onChange={e=>set('lng',e.target.value)}/></Field></div><p className="muted small">Bản đồ và tìm địa chỉ: © OpenStreetMap contributors / Nominatim. Kiểm tra lại ghim trước khi gửi.</p></>}
  <div className="form-grid"><Field label="Tên món tại quán *"><input required value={f.dish} onChange={e=>set('dish',e.target.value)} placeholder="Ví dụ: Phở bò tái nạm" maxLength={100}/></Field><Field label="Loại món chuẩn hóa *"><input required value={f.typeName} onChange={e=>set('typeName',e.target.value)} list="food-types" placeholder="Ví dụ: Phở" maxLength={70}/><datalist id="food-types">{data.types.map((t:any)=><option key={t.id} value={t.name}/>)}</datalist></Field></div><p className="muted small">Chọn loại đã có nếu phù hợp. “Phở”, “phở” và “Pho” được chuẩn hóa; các tên gần nghĩa sẽ được quản trị viên gộp khi duyệt.</p><div className="form-grid"><Field label="Nhóm món"><select value={f.category} onChange={e=>set('category',e.target.value)}>{POST_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field><Field label="Bữa ăn phù hợp"><select value={f.meal} onChange={e=>set('meal',e.target.value)}>{['Sáng','Trưa','Tối','Ăn khuya'].map(m=><option key={m}>{m}</option>)}</select></Field></div><label className="check"><input type="checkbox" checked={f.vegetarian} onChange={e=>set('vegetarian',e.target.checked)}/> Đây là món chay</label></>}</>}
  <h3><span className="step">2</span> Lần ăn thực tế</h3><div className="form-grid"><Field label="Tên hiển thị *"><input required maxLength={60} minLength={2} value={f.author} onChange={e=>set('author',e.target.value)}/></Field><Field label="Ngày bạn đến ăn *"><input type="date" required max={new Date().toISOString().slice(0,10)} value={f.date} onChange={e=>set('date',e.target.value)}/></Field></div><div className="form-grid thirds"><Field label="Tổng tiền đã trả (đ) *"><input required type="number" min={1000} max={100000000} step={1} value={f.total} onChange={e=>set('total',e.target.value)}/></Field><Field label="Số phần *"><input type="number" required min={1} max={100} value={f.portions} onChange={e=>set('portions',e.target.value)}/></Field><Field label="Số người ăn *"><input required type="number" min={1} max={100} value={f.people} onChange={e=>set('people',e.target.value)}/></Field></div><div className="form-grid"><Field label="Giá tham khảo tính theo"><select value={f.unit} onChange={e=>set('unit',e.target.value)}><option value="phan">Mỗi phần (tổng tiền / số phần)</option><option value="nguoi">Mỗi người (tổng tiền / số người)</option><option value="combo">Cả combo (tổng tiền)</option></select></Field><Field label="Đánh giá của bạn"><select value={f.rating} onChange={e=>set('rating',Number(e.target.value))}>{[5,4,3,2,1].map(n=><option key={n} value={n}>{n} sao</option>)}</select></Field></div><Field label="Hương vị và trải nghiệm *"><textarea required minLength={20} maxLength={1200} rows={4} value={f.taste} onChange={e=>set('taste',e.target.value)} placeholder="Bạn gọi món gì? Vị như thế nào? Có điểm gì nên biết trước khi ghé?"/></Field><div className="form-grid"><Field label="Khẩu phần"><textarea value={f.portion} maxLength={600} onChange={e=>set('portion',e.target.value)} placeholder="Một phần có đủ no không?"/></Field><Field label="Có đáng tiền không?"><textarea value={f.value} maxLength={600} onChange={e=>set('value',e.target.value)} placeholder="Chia sẻ cảm nhận của bạn"/></Field></div><label className="check"><input type="checkbox" checked={!!f.sponsored} onChange={e=>set('sponsored',e.target.checked)}/> Có tài trợ / được mời ăn</label>
  {!editing&&<><h3><span className="step">3</span> Ảnh do bạn tự chụp</h3><div className="form-grid"><label className="upload"><Camera/><strong>Ảnh món ăn *</strong><span>JPEG/PNG · tối đa 5 ảnh kể cả mặt tiền</span><input type="file" multiple accept="image/jpeg,image/png" disabled={uploading||pics.length+(front?1:0)>=5} onChange={e=>upload(e.target.files)}/></label>{<label className="upload"><MapPin/><strong>Ảnh mặt tiền quán</strong><span>Khuyến khích để dễ nhận diện</span><input type="file" accept="image/jpeg,image/png" disabled={uploading||pics.length>=5} onChange={e=>upload(e.target.files,true)}/></label>}</div><div className="image-preview">{pics.map(id=><div key={id}><img src={photo(id)} alt="Ảnh bạn vừa tải lên"/><button type="button" onClick={()=>setPics(p=>p.filter(x=>x!==id))} aria-label="Bỏ ảnh"><X size={14}/></button></div>)}{front&&<div><img src={photo(front)} alt="Mặt tiền quán"/><button type="button" aria-label="Bỏ ảnh mặt tiền" onClick={()=>setFront('')}><X size={14}/></button></div>}</div><p className="muted small">Chỉ đăng ảnh bạn có quyền chia sẻ. Ảnh được nén và loại bỏ metadata vị trí trước khi công khai.</p></>}{uploading&&<p className="muted"><LoaderCircle className="spin" size={16}/> Đang xử lý ảnh…</p>}{error&&<p role="alert" className="error">{error}</p>}<button disabled={busy||uploading} className="button primary full" type="submit">{busy?<LoaderCircle className="spin" size={18}/>:<Check size={18}/>} {editing?'Lưu cập nhật để duyệt':'Gửi trải nghiệm để duyệt'}</button></form>

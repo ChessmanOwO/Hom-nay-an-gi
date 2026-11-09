@@ -4,6 +4,7 @@ import {paginate} from './pagination';
 import {getAdminRole,canAdminAction} from './admin-role';
 import {POST_CATEGORIES,matchesDiscovery} from './discovery';
 import {cleanImage,canonical,haversine} from './security';
+import {extractMapsCoords,isShortGoogleMapsUrl} from './maps';
 import type {ApiEnvironment,AppUser} from './runtime';
 export function createApi({env,getUser,authProvider='sites'}:{env:ApiEnvironment;getUser:(req:Request)=>Promise<AppUser|null>;authProvider?:'sites'|'firebase'}){
 const db=()=>{if(!env.DB)throw Error('Kho dữ liệu chưa được kết nối.');return env.DB};
@@ -57,6 +58,21 @@ async function handle(req:Request,method:string){try{
   await limit(u.userId,'upload',20);must(Number(req.headers.get('content-length')||0)<=3_000_000,'Ảnh quá lớn.');const b=await readLimited(req,3_000_000);const img=cleanImage(b),id=uuid();must(env.BUCKET,'Kho ảnh chưa được kết nối.');await env.BUCKET!.put(id,img.data,{httpMetadata:{contentType:img.mime}});await stmt('INSERT INTO photos(id,owner,mime,created) VALUES(?,?,?,?)',id,u.userId,img.mime,Date.now()).run();return json({id})
  }
  must(Number(req.headers.get('content-length')||0)<40000,'Dữ liệu quá lớn.');const b:any=JSON.parse(new TextDecoder().decode(await readLimited(req,40000)));await limit(u.userId,'write',35);
+ if(path[0]==='resolve-maps'){
+  const rawUrl=text(b.url,2000);must(rawUrl,'Vui lòng nhập liên kết Google Maps.');
+  try{
+   let target=rawUrl;
+   if(isShortGoogleMapsUrl(target)){
+    const res=await fetch(target,{method:'GET',redirect:'follow',headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}});
+    target=res.url;
+   }
+   const parsed=extractMapsCoords(target);
+   must(parsed,'Không tìm thấy tọa độ trong liên kết này. Hãy thử liên kết đầy đủ hoặc bấm bản đồ.');
+   return json({lat:parsed!.lat,lng:parsed!.lng,name:parsed!.name||'',url:target});
+  }catch(err:any){
+   return json({error:err.message||'Không thể trích xuất liên kết Google Maps.'},400);
+  }
+ }
  if(path[0]==='place-reviews')return await placeWrite(method,b,u,{one,stmt,db,must,text,json,uuid,checkAbuse});
  if(path[0]==='reviews'&&method==='POST'){
   const now=Date.now(),author=text(b.author,60),date=text(b.date,10),rating=Number(b.rating),total=Number(b.total),portions=Number(b.portions),people=Number(b.people),unit=text(b.unit,10),photos=await photoCheck(b.photos,u);
