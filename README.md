@@ -38,10 +38,17 @@ Schema: `db/schema.ts`. Migrations là schema-only, không chứa dữ liệu de
 - restaurants: địa chỉ, tọa độ, ảnh mặt tiền, giờ do cộng đồng cung cấp, trạng thái.
 - offerings: món tại quán, type, nhóm lọc/bữa ăn.
 - reviews: một bài hiện hành cho mỗi user/món tại quán, trạng thái duyệt và nội dung.
+- place_reviews: đánh giá quán (tối đa 10 lượt/user/quán; xóa bài khôi phục lại 1 lượt).
+- blocked_ips & account_access: chặn IP và khóa tài khoản chống seeding tự động.
 - price_history: ảnh chụp lịch sử giá của mỗi lần sửa, chỉ truy cập công khai khi bài hiện hành được duyệt.
-- photos: metadata quyền sở hữu ảnh; binary ở R2.
+- photos: metadata quyền sở hữu ảnh; binary ở R2/VPS storage.
 - saves, votes, reports, audit, limits: tương tác và vận hành.
 Không lưu tọa độ cá nhân vào database. Việc dùng bản đồ/định tuyến gửi tọa độ cho nhà cung cấp tương ứng khi người dùng dùng chức năng đó.
+
+## Tự động hóa CI/CD
+Dự án tích hợp sẵn GitHub Actions CI/CD (`.github/workflows/deploy.yml`):
+- Tự động chạy toàn bộ bộ Unit Tests, Place Limit Tests, Abuse Tests & Build kiểm thử khi có commit vào nhánh `main`.
+- Tự động SSH vào Azure VM (`20.2.217.57`), kéo code mới nhất, build lại Docker container và reload dịch vụ trong ~35 giây mà không làm gián đoạn dữ liệu.
 
 ## Ảnh và bảo mật
 Ảnh upload chỉ JPEG/PNG, tối đa 3 MB sau xử lý, 6 ảnh/bài. Client nén, server kiểm tra cấu trúc và loại bỏ metadata ảnh. Ảnh chờ duyệt chỉ chủ ảnh hoặc admin xem; ảnh đã công khai mới có thể xem cộng đồng. Ảnh chưa gắn bài không tự công khai.
