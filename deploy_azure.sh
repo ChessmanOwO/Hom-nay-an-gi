@@ -1,89 +1,162 @@
 #!/usr/bin/env bash
-set -e
+set -Eeuo pipefail
+umask 077
 
-echo "=========================================================="
-echo "🚀 BẮT ĐẦU TỰ ĐỘNG TRIỂN KHAI HÔM NAY ĂN GÌ LÊN AZURE VM"
-echo "=========================================================="
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$APP_DIR"
+ENV_FILE="$APP_DIR/.env.vps"
+FIREBASE_CONFIG="$APP_DIR/config/firebase-web.json"
+fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+TEMP_ENV=""
+cleanup() { if [[ -n "$TEMP_ENV" && -e "$TEMP_ENV" ]]; then rm -f -- "$TEMP_ENV"; fi; }
+trap cleanup EXIT
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+command -v sudo >/dev/null || fail 'sudo is required.'
+command -v openssl >/dev/null || fail 'openssl is required to generate the database password.'
 
-echo "📦 1. Cài đặt các gói phụ trợ cần thiết (Docker, Nginx, Certbot)..."
+if [[ ! -f "$ENV_FILE" ]]; then
+  read -r -p 'Domain (example.com or https://example.com): ' DOMAIN
+  DOMAIN="${DOMAIN#https://}"
+  DOMAIN="${DOMAIN#http://}"
+  DOMAIN="${DOMAIN%/}"
+  [[ "$DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || fail 'Enter a public DNS hostname without a path or port.'
+  DOMAIN="${DOMAIN,,}"
+  PUBLIC_ORIGIN="https://$DOMAIN"
+
+  read -r -p 'Firebase project ID: ' FIREBASE_PROJECT_ID
+  [[ "$FIREBASE_PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || fail 'Invalid Firebase project ID.'
+  read -r -p 'Super Admin Google email(s), comma separated: ' ADMIN_EMAILS
+  [[ -n "${ADMIN_EMAILS//[[:space:]]/}" ]] || fail 'At least one Super Admin email is required.'
+  IFS=',' read -ra ADMIN_LIST <<< "$ADMIN_EMAILS"
+  for email in "${ADMIN_LIST[@]}"; do
+    email="${email//[[:space:]]/}"
+    [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail 'One of the admin email addresses is invalid.'
+  done
+  DATABASE_PASSWORD="$(openssl rand -hex 32)"
+  TEMP_ENV="$(mktemp "$APP_DIR/.env.vps.XXXXXX")"
+  chmod 600 "$TEMP_ENV"
+  {
+    printf 'PUBLIC_ORIGIN=%s\n' "$PUBLIC_ORIGIN"
+    printf 'FIREBASE_PROJECT_ID=%s\n' "$FIREBASE_PROJECT_ID"
+    printf 'ADMIN_EMAILS=%s\n' "${ADMIN_EMAILS//[[:space:]]/}"
+    printf 'MODERATOR_EMAILS=\n'
+    printf 'TRUSTED_PROXY_IPS=172.29.0.1\n'
+    printf 'DATABASE_URL=postgresql://hnag:%s@postgres:5432/hnag\n' "$DATABASE_PASSWORD"
+    printf 'PG_POOL_MAX=10\n'
+    printf 'POSTGRES_PASSWORD=%s\n' "$DATABASE_PASSWORD"
+  } > "$TEMP_ENV"
+  mv -- "$TEMP_ENV" "$ENV_FILE"
+  printf 'Created .env.vps with owner-only permissions. Keep it off GitHub and out of archives.\n'
+else
+  chmod 600 "$ENV_FILE"
+  PUBLIC_ORIGIN="$(sed -n 's/^PUBLIC_ORIGIN=//p' "$ENV_FILE" | tail -n 1)"
+  FIREBASE_PROJECT_ID="$(sed -n 's/^FIREBASE_PROJECT_ID=//p' "$ENV_FILE" | tail -n 1)"
+  [[ -n "$PUBLIC_ORIGIN" && -n "$FIREBASE_PROJECT_ID" ]] || fail '.env.vps must set PUBLIC_ORIGIN and FIREBASE_PROJECT_ID.'
+  [[ "$PUBLIC_ORIGIN" =~ ^https://([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]] || fail 'PUBLIC_ORIGIN must be an HTTPS origin without path or port.'
+  DOMAIN="${PUBLIC_ORIGIN#https://}"
+fi
+
+python3 - "$ENV_FILE" <<'PY'
+from urllib.parse import unquote, urlparse
+import sys
+
+values = {}
+with open(sys.argv[1], encoding="utf-8") as file:
+    for line in file:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value.strip().strip('"').strip("'")
+required = ("DATABASE_URL", "POSTGRES_PASSWORD", "ADMIN_EMAILS")
+if any(not values.get(key) for key in required):
+    raise SystemExit("ERROR: .env.vps must set DATABASE_URL, POSTGRES_PASSWORD and ADMIN_EMAILS.")
+if unquote(urlparse(values["DATABASE_URL"]).password or "") != values["POSTGRES_PASSWORD"]:
+    raise SystemExit("ERROR: the PostgreSQL URL password and POSTGRES_PASSWORD must match.")
+PY
+
+[[ -f "$FIREBASE_CONFIG" ]] || fail 'Create config/firebase-web.json from Firebase Console before running deployment.'
+python3 - "$FIREBASE_CONFIG" "$FIREBASE_PROJECT_ID" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as file:
+    config = json.load(file)
+if config.get("projectId") != sys.argv[2] or not config.get("apiKey") or "YOUR_" in config.get("apiKey", ""):
+    raise SystemExit("ERROR: Firebase web config is a placeholder or uses a different project.")
+PY
+
+read -r -p 'Email for TLS certificate notices: ' CERTBOT_EMAIL
+[[ "$CERTBOT_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || fail 'Enter a valid certificate contact email.'
+
+printf 'Installing Docker, Nginx and Certbot packages...\n'
 sudo apt-get update -y
-sudo apt-get install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx git curl
+sudo apt-get install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx curl
 sudo systemctl enable --now docker
 sudo systemctl enable --now nginx
 
-echo "📝 2. Thiết lập cấu hình bảo mật .env.vps..."
-cat << 'EOF' > .env.vps
-PUBLIC_ORIGIN=https://homnayangi.eastasia.cloudapp.azure.com
-FIREBASE_PROJECT_ID=hom-nay-an
-ADMIN_EMAILS="REDACTED_EMAIL,REDACTED_EMAIL,REDACTED_EMAIL,REDACTED_EMAIL"
-MODERATOR_EMAILS=
-TRUSTED_PROXY_IPS=172.29.0.1
-DATABASE_URL=postgresql://hnag:REDACTED@postgres:5432/hnag
-PG_POOL_MAX=10
-POSTGRES_PASSWORD=REDACTED
-EOF
-
-echo "🔑 3. Thiết lập cấu hình Firebase Web Client..."
-mkdir -p config
-cat << 'EOF' > config/firebase-web.json
-{
-  "apiKey": "AIzaSyD2jO7r66OBghQeRYA9tR0aqeOnrsHCVtc",
-  "authDomain": "hom-nay-an.firebaseapp.com",
-  "projectId": "hom-nay-an",
-  "storageBucket": "hom-nay-an.firebasestorage.app",
-  "messagingSenderId": "641001130624",
-  "appId": "1:641001130624:web:f7ff40dba5f96b4664f465",
-  "measurementId": "G-WHK8KP8VTQ"
-}
-EOF
-
-echo "🐳 4. Khởi động Docker Containers (PostgreSQL 17 + App Server)..."
-sudo docker compose --env-file .env.vps -f compose.vps.yaml down || true
+printf 'Building and starting PostgreSQL and the application...\n'
 sudo docker compose --env-file .env.vps -f compose.vps.yaml up -d --build
-
-echo "⏳ Đang chờ hệ thống khởi động và kiểm tra tính sẵn sàng..."
-for i in {1..30}; do
-  if curl -sf http://127.0.0.1:3000/healthz > /dev/null 2>&1; then
-    echo "✅ App Server đã hoạt động ổn định trên port 3000!"
-    break
-  fi
+HEALTHY=0
+for _ in $(seq 1 60); do
+  if curl -fsS http://127.0.0.1:3000/healthz >/dev/null 2>&1; then HEALTHY=1; break; fi
   sleep 2
 done
+if [[ "$HEALTHY" != 1 ]]; then
+  sudo docker compose --env-file .env.vps -f compose.vps.yaml logs --tail=100 web postgres >&2
+  fail 'Application health check failed. Database and app volumes were preserved.'
+fi
 
-echo "🌐 5. Cấu hình Nginx Reverse Proxy..."
-sudo tee /etc/nginx/sites-available/homnayangi > /dev/null << 'EOF'
+sudo tee /etc/nginx/conf.d/homnayangi-limits.conf >/dev/null <<'EOF'
+limit_req_zone $binary_remote_addr zone=hnag_requests:10m rate=30r/s;
+limit_conn_zone $binary_remote_addr zone=hnag_conn:10m;
+EOF
+sudo mkdir -p /var/www/html
+CERT_FILE="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+if [[ ! -s "$CERT_FILE" ]]; then
+  sudo tee /etc/nginx/sites-available/homnayangi >/dev/null <<EOF
 server {
     listen 80;
-    server_name homnayangi.eastasia.cloudapp.azure.com 20.2.217.57;
+    server_name $DOMAIN;
+    location ^~ /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 503; }
+}
+EOF
+  sudo ln -sfn /etc/nginx/sites-available/homnayangi /etc/nginx/sites-enabled/homnayangi
+  sudo nginx -t
+  sudo systemctl reload nginx
+  sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$CERTBOT_EMAIL" --redirect
+  [[ -s "$CERT_FILE" ]] || fail 'TLS certificate was not created; the app is not exposed over plain HTTP.'
+fi
 
+sudo tee /etc/nginx/sites-available/homnayangi >/dev/null <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    return 308 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name $DOMAIN;
+    ssl_certificate $CERT_FILE;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 4m;
+    limit_req_status 429;
+    limit_conn_status 429;
+    limit_conn hnag_conn 40;
     location / {
+        limit_req zone=hnag_requests burst=60 nodelay;
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 60s;
     }
 }
 EOF
-
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo ln -sf /etc/nginx/sites-available/homnayangi /etc/nginx/sites-enabled/
+sudo ln -sfn /etc/nginx/sites-available/homnayangi /etc/nginx/sites-enabled/homnayangi
 sudo nginx -t
-sudo systemctl restart nginx
-
-echo "🔒 6. Cấp chứng chỉ HTTPS miễn phí Let's Encrypt (Certbot)..."
-sudo certbot --nginx -d homnayangi.eastasia.cloudapp.azure.com --non-interactive --agree-tos -m REDACTED_EMAIL --redirect || {
-  echo "⚠️ Lưu ý: Chưa cấp được SSL do cổng 80/443 trên Azure NSG chưa mở hoặc DNS đang trỏ. Web hiện vẫn chạy bình thường qua HTTP!"
-}
-
-echo ""
-echo "=========================================================="
-echo "🎉 CHÚC MỪNG ANH TÚ! DỰ ÁN ĐÃ TRIỂN KHAI THÀNH CÔNG!"
-echo "🌐 Domain HTTPS: https://homnayangi.eastasia.cloudapp.azure.com"
-echo "🌐 Link trực tiếp: http://20.2.217.57"
-echo "=========================================================="
+sudo systemctl reload nginx
+curl -fsS "https://$DOMAIN/healthz" >/dev/null || fail 'HTTPS health check failed.'
+printf 'Deployment is healthy at %s\n' "$PUBLIC_ORIGIN"
+printf 'Keep .env.vps and config/firebase-web.json private. This single web container can have brief restart downtime.\n'
