@@ -80,8 +80,10 @@ jobs:
 
             PREVIOUS_CONTAINER="$(sudo docker compose --env-file .env.vps -f compose.vps.yaml ps -q web || true)"
             PREVIOUS_IMAGE=""
+            PREVIOUS_TAG=""
             if [ -n "$PREVIOUS_CONTAINER" ]; then
               PREVIOUS_IMAGE="$(sudo docker inspect --format '{{.Image}}' "$PREVIOUS_CONTAINER" 2>/dev/null || true)"
+              PREVIOUS_TAG="$(sudo docker inspect --format '{{.Config.Image}}' "$PREVIOUS_CONTAINER" 2>/dev/null || true)"
             fi
 
             echo "🐳 [CI/CD] Đang build lại Docker container và áp dụng migration..."
@@ -100,12 +102,9 @@ jobs:
             if [ "$HEALTHY" != "1" ]; then
               echo "❌ [CI/CD] Container mới không vượt qua /healthz! Bắt đầu khôi phục..." >&2
               sudo docker compose --env-file .env.vps -f compose.vps.yaml logs --tail=80 web postgres >&2 || true
-              if [ -n "$PREVIOUS_IMAGE" ]; then
-                CURRENT_REPO_TAG="$(sudo docker compose --env-file .env.vps -f compose.vps.yaml images web --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | head -n 1 || true)"
-                if [ -n "$CURRENT_REPO_TAG" ] && [ "$CURRENT_REPO_TAG" != "<none>:<none>" ]; then
-                  sudo docker tag "$PREVIOUS_IMAGE" "$CURRENT_REPO_TAG" || true
-                  sudo docker compose --env-file .env.vps -f compose.vps.yaml up -d --no-build web || true
-                fi
+              if [ -n "$PREVIOUS_IMAGE" ] && [ -n "$PREVIOUS_TAG" ] && [ "$PREVIOUS_TAG" != "<none>:<none>" ]; then
+                sudo docker tag "$PREVIOUS_IMAGE" "$PREVIOUS_TAG" || true
+                sudo docker compose --env-file .env.vps -f compose.vps.yaml up -d --no-build web || true
               fi
               exit 1
             fi
