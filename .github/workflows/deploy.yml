@@ -36,13 +36,13 @@ jobs:
       - name: Cài đặt dependencies
         run: npm ci --include=dev --no-audit --no-fund
 
+      - name: Build VPS client & server bundle
+        run: npm run build:vps
+
       - name: Kiểm tra kiểu TypeScript & cú pháp deploy script
         run: |
           npx tsc --noEmit
           bash -n deploy_azure.sh
-
-      - name: Build VPS client & server bundle
-        run: npm run build:vps
 
       - name: Chạy toàn bộ Unit, Auth, Limit, Abuse & PostgreSQL Tests
         env:
