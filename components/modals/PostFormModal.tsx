@@ -17,7 +17,7 @@ function PostForm({data,existing,done,notify,editing,lookupSearch,setLookupSearc
  async function reverseGeocode(lat:number,lng:number){
   try{
    const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
-   const a=await r.json();
+   const a:any=await r.json();
    if(a?.address){
     const road=a.address.road||a.address.pedestrian||a.address.hamlet||'';
     const num=a.address.house_number||'';

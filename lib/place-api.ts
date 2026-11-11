@@ -1,5 +1,5 @@
 // Same trusted Sites identity and moderation boundary as dish experiences.
-export async function placeRead(id:string,p:URLSearchParams,u:any,{one,all,json}:any){
+export async function placeRead(id:string,p:URLSearchParams,u:any,{one,all,json}:any,includeOwner=false){
  const item=await one("SELECT id,name,address,city,district,lat,lng,hours,front FROM restaurants WHERE id=? AND status='active'",id);
  if(!item)return json({error:'Quán chưa công khai hoặc đã ngừng hoạt động.'},404);
  const scores=await all("SELECT rating,COUNT(*) count FROM place_reviews WHERE restaurant=? AND status='approved' GROUP BY rating",id);
@@ -12,7 +12,8 @@ export async function placeRead(id:string,p:URLSearchParams,u:any,{one,all,json}
  const mineReviews=u?await all('SELECT * FROM place_reviews WHERE restaurant=? AND owner=? ORDER BY created DESC,id DESC',id,u.userId):[];
  const mine=mineReviews.find((r:any)=>r.status!=='deleted')||mineReviews[0]||null;
  const activeMineCount=mineReviews.filter((r:any)=>r.status!=='deleted').length;
- return json({mineReviews:mineReviews.map((r:any)=>({...r,media:JSON.parse(r.media)})),reviewLimit:10,reviewCount:activeMineCount,item,total,rating,scores,page,hasMore:page*size<total,reviews:rows.map((r:any)=>({...r,media:JSON.parse(r.media)})),mine:mine?{...mine,media:JSON.parse(mine.media)}:null});
+ const serializePublicReview=(r:any)=>{const base={...r,media:JSON.parse(r.media)};if(!includeOwner)delete base.owner;return base;};
+ return json({mineReviews:mineReviews.map((r:any)=>({...r,media:JSON.parse(r.media)})),reviewLimit:10,reviewCount:activeMineCount,item,total,rating,scores,page,hasMore:page*size<total,reviews:rows.map(serializePublicReview),mine:mine?{...mine,media:JSON.parse(mine.media)}:null});
 }
 export async function placeWrite(method:string,b:any,u:any,{one,stmt,db,must,text,json,uuid,checkAbuse}:any){
  const id=text(b.id,100),now=Date.now();let old:any=null;

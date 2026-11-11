@@ -149,6 +149,11 @@ CREATE TABLE "account_access" (
  "disabled" bigint NOT NULL DEFAULT 0,
  "revoked_before" bigint NOT NULL DEFAULT 0
 );
+CREATE TABLE "blocked_ips" (
+ "ip" text PRIMARY KEY NOT NULL,
+ "reason" text,
+ "created" bigint NOT NULL
+);
 CREATE UNIQUE INDEX "offering_identity" ON "offerings" ("restaurant","type","name");
 CREATE UNIQUE INDEX "one_review" ON "reviews" ("owner","offering");
 CREATE UNIQUE INDEX "one_save" ON "saves" ("owner","kind","target");

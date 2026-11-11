@@ -80,7 +80,7 @@ async function handle(req:Request,method:string){try{
  }
 
  if(method==='GET'){
-  if(path[0]==='place')return await placeRead(path[1],url.searchParams,u,{one,all,json});
+  if(path[0]==='place')return await placeRead(path[1],url.searchParams,u,{one,all,json},role==='superadmin');
   if(path[0]==='backup'){
    if(role!=='superadmin')return json({error:'Bạn không có quyền quản trị.'},403);
    const day=url.searchParams.get('day')||new Date().toISOString().slice(0,10);
@@ -93,7 +93,7 @@ async function handle(req:Request,method:string){try{
    const n=await countTypes();
    let topContributors:any[]=[];
    try{
-    topContributors=await all(`
+    const contributors=await all(`
      SELECT author, owner, COUNT(*) as count,
        SUM(CASE WHEN kind='place' THEN 1 ELSE 0 END) as places,
        SUM(CASE WHEN kind='dish' THEN 1 ELSE 0 END) as dishes
@@ -106,6 +106,7 @@ async function handle(req:Request,method:string){try{
      ORDER BY count DESC, author ASC
      LIMIT 5
     `);
+    topContributors=contributors.map(({owner: _owner,...entry}:any)=>entry);
    }catch{}
    return json({
     authProvider,
@@ -123,7 +124,8 @@ async function handle(req:Request,method:string){try{
    const item=await one("SELECT o.id,o.restaurant,o.type,o.name,o.category,o.meal,o.vegetarian,o.status,o.created,r.name restaurant_name,r.address,r.city,r.district,r.lat,r.lng,r.hours,r.front FROM offerings o JOIN restaurants r ON r.id=o.restaurant JOIN food_types t ON t.id=o.type WHERE o.id=? AND o.status='approved' AND r.status='active' AND t.status='approved'",id);
    must(item,'Món này chưa công khai hoặc quán đã ngừng hoạt động.');
    const rr=await all(`SELECT v.id,v.author,v.owner,v.date,v.total,v.portions,v.people,v.unit,v.rating,v.taste,v.portion,v.value,v.photos,v.sponsored,v.updated,(SELECT COUNT(*) FROM votes WHERE review=v.id) helpful FROM reviews v WHERE offering=? AND status='approved' ORDER BY date DESC,updated DESC`,id);
-   return json({item,siblings:await filteredCatalog(new URLSearchParams(),undefined,item.restaurant),reviews:rr.map(v=>({...v,photos:JSON.parse(v.photos)})),history:await all("SELECT h.date,h.total,h.portions,h.people,h.unit FROM price_history h JOIN reviews v ON v.id=h.review WHERE v.offering=? AND v.status='approved' ORDER BY h.date DESC LIMIT 40",id)});
+   const serializeReview=(v:any)=>{const base={...v,photos:JSON.parse(v.photos)};if(role!=='superadmin')delete base.owner;return base;};
+   return json({item,siblings:await filteredCatalog(new URLSearchParams(),undefined,item.restaurant),reviews:rr.map(serializeReview),history:await all("SELECT h.date,h.total,h.portions,h.people,h.unit FROM price_history h JOIN reviews v ON v.id=h.review WHERE v.offering=? AND v.status='approved' ORDER BY h.date DESC LIMIT 40",id)});
   }
   if(path[0]==='photo'){
    const id=path[1];must(/^[a-zA-Z0-9_-]{1,100}$/.test(id),'Mã ảnh không hợp lệ.');const p=await one('SELECT * FROM photos WHERE id=?',id);must(p,'Không tìm thấy ảnh.');
@@ -143,19 +145,22 @@ async function handle(req:Request,method:string){try{
   }
   if(path[0]==='admin'){
    if(!admin)return json({error:'Bạn không có quyền quản trị.'},403);
+   const redactOwner=(rows:any[])=>role==='superadmin'?rows:rows.map(({owner: _owner,...rest}:any)=>rest);
    let blockedIps:any[]=[],bannedUsers:any[]=[];
-   try{blockedIps=await all('SELECT * FROM blocked_ips ORDER BY created DESC LIMIT 100')}catch{}
-   try{bannedUsers=await all('SELECT u.id, u.email, u.display_name, a.disabled, a.revoked_before FROM app_users u JOIN account_access a ON a.google_uid=u.google_uid WHERE a.disabled=1 LIMIT 100')}catch{}
+   if(role==='superadmin'){
+    try{blockedIps=await all('SELECT * FROM blocked_ips ORDER BY created DESC LIMIT 100')}catch{}
+    try{bannedUsers=await all('SELECT u.id, u.email, u.display_name, a.disabled, a.revoked_before FROM app_users u JOIN account_access a ON a.google_uid=u.google_uid WHERE a.disabled=1 LIMIT 100')}catch{}
+   }
    return json({
     role,
     networkDetection:{available:!!req.headers.get('x-hnag-client-ip')},
-    placeQueue:await all("SELECT v.*,(SELECT flags FROM review_events WHERE target=v.id ORDER BY created DESC LIMIT 1) risk_flags,r.name restaurant_name,r.address,r.city,r.district FROM place_reviews v JOIN restaurants r ON r.id=v.restaurant WHERE v.status!='deleted' ORDER BY CASE v.status WHEN 'pending' THEN 0 ELSE 1 END,v.updated DESC LIMIT 200"),
-    queue:await all("SELECT v.*,(SELECT flags FROM review_events WHERE target=v.id ORDER BY created DESC LIMIT 1) risk_flags,o.name dish,o.category,t.name type_name,o.type,o.restaurant,r.name restaurant_name,r.address,r.city,r.district FROM reviews v JOIN offerings o ON o.id=v.offering JOIN food_types t ON t.id=o.type JOIN restaurants r ON r.id=o.restaurant WHERE v.status!='deleted' ORDER BY CASE v.status WHEN 'pending' THEN 0 ELSE 1 END,v.updated DESC LIMIT 200"),
+    placeQueue:redactOwner(await all("SELECT v.*,(SELECT flags FROM review_events WHERE target=v.id ORDER BY created DESC LIMIT 1) risk_flags,r.name restaurant_name,r.address,r.city,r.district FROM place_reviews v JOIN restaurants r ON r.id=v.restaurant WHERE v.status!='deleted' ORDER BY CASE v.status WHEN 'pending' THEN 0 ELSE 1 END,v.updated DESC LIMIT 200")),
+    queue:redactOwner(await all("SELECT v.*,(SELECT flags FROM review_events WHERE target=v.id ORDER BY created DESC LIMIT 1) risk_flags,o.name dish,o.category,t.name type_name,o.type,o.restaurant,r.name restaurant_name,r.address,r.city,r.district FROM reviews v JOIN offerings o ON o.id=v.offering JOIN food_types t ON t.id=o.type JOIN restaurants r ON r.id=o.restaurant WHERE v.status!='deleted' ORDER BY CASE v.status WHEN 'pending' THEN 0 ELSE 1 END,v.updated DESC LIMIT 200")),
     blockedIps,
     bannedUsers,
     types:role==='superadmin'?await all('SELECT * FROM food_types ORDER BY name'):[],
     restaurants:role==='superadmin'?await all('SELECT * FROM restaurants ORDER BY created DESC LIMIT 300'):[],
-    reports:await all("SELECT * FROM reports WHERE status='open' ORDER BY created DESC"),
+    reports:redactOwner(await all("SELECT * FROM reports WHERE status='open' ORDER BY created DESC")),
     audit:role==='superadmin'?await all('SELECT action,target,reason,created FROM audit ORDER BY created DESC LIMIT 60'):[]
    });
   }
@@ -203,7 +208,7 @@ async function handle(req:Request,method:string){try{
   const prev=await one("SELECT id,owner FROM reviews WHERE owner=? AND offering=? AND status!='deleted'",u.userId,offering);must(!prev,'Bạn đã đánh giá món này. Hãy cập nhật bài cũ ở mục Của tôi.');if(b.front)await photoCheck([b.front],u);const id=uuid();await checkAbuse({owner:u.userId,restaurant,target:id,content:taste});ops.push(stmt('INSERT INTO reviews(id,offering,owner,author,date,total,portions,people,unit,rating,taste,portion,value,photos,front,sponsored,status,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,offering,u.userId,author,date,total,portions,people,unit,rating,taste,portion,value,JSON.stringify(photos),text(b.front,100),b.sponsored?1:0,'pending','',now,now));ops.push(stmt('INSERT INTO price_history(id,review,date,total,portions,people,unit,created) VALUES(?,?,?,?,?,?,?,?)',uuid(),id,date,total,portions,people,unit,now));await db().batch(ops);return json({id,message:'Đã gửi trải nghiệm. Bài và địa điểm mới sẽ hiển thị sau khi được duyệt.'});
  }
  if(path[0]==='reviews'&&['PATCH','DELETE'].includes(method)){
-  const r=await one('SELECT * FROM reviews WHERE id=? AND owner=? AND status!=?',text(b.id,100),u.userId,'deleted');must(r,'Không tìm thấy bài của bạn.');if(method==='DELETE'){await stmt("UPDATE reviews SET status='deleted',updated=? WHERE id=? AND owner=?",Date.now(),r.id,u.userId).run();return json({ok:true,message:'Đã xóa bài đánh giá và khôi phục 1 lượt đánh giá.'});}
+  const r=await one('SELECT * FROM reviews WHERE id=? AND owner=? AND status!=?',text(b.id,100),u.userId,'deleted');must(r,'Không tìm thấy bài của bạn.');if(method==='DELETE'){await stmt("UPDATE reviews SET status='deleted',updated=? WHERE id=? AND owner=?",Date.now(),r.id,u.userId).run();return json({ok:true,message:'Đã xóa bài đánh giá món.'});}
   const taste=text(b.taste,1200),portion=text(b.portion,600),value=text(b.value,600),rating=Number(b.rating),total=Number(b.total),portions=Number(b.portions),people=Number(b.people),unit=text(b.unit,10),date=text(b.date,10);must(taste.length>=20&&Number.isInteger(rating)&&rating>=1&&rating<=5,'Nhận xét ít nhất 20 ký tự; điểm từ 1 đến 5.');must(Number.isInteger(total)&&total>=1000&&total<=1e8&&Number.isInteger(portions)&&portions>=1&&portions<=100&&Number.isInteger(people)&&people>=1&&people<=100&&['phan','nguoi','combo'].includes(unit),'Giá hoặc số phần/người không hợp lệ.');must(/^\d{4}-\d{2}-\d{2}$/.test(date)&&!isNaN(Date.parse(date))&&date<=new Date().toISOString().slice(0,10),'Ngày không hợp lệ.');const place=await one('SELECT restaurant FROM offerings WHERE id=?',r.offering);await checkAbuse({owner:u.userId,restaurant:place.restaurant,target:r.id,content:taste});await db().batch([stmt("UPDATE reviews SET date=?,rating=?,total=?,portions=?,people=?,unit=?,taste=?,portion=?,value=?,sponsored=?,status='pending',reason='',updated=? WHERE id=? AND owner=?",date,rating,total,portions,people,unit,taste,portion,value,b.sponsored?1:0,Date.now(),r.id,u.userId),stmt('INSERT INTO price_history(id,review,date,total,portions,people,unit,created) VALUES(?,?,?,?,?,?,?,?)',uuid(),r.id,date,total,portions,people,unit,Date.now())]);return json({message:'Bài cập nhật đang chờ duyệt. Lịch sử giá vẫn được giữ.'});
  }
  if(path[0]==='save'){const kind=text(b.kind,20),target=text(b.target,100);must(['dish','restaurant'].includes(kind),'Loại lưu không hợp lệ.');must(await one(kind==='dish'?"SELECT id FROM offerings WHERE id=? AND status='approved'":"SELECT id FROM restaurants WHERE id=? AND status='active'",target),'Nội dung chưa công khai.');const old=await one('SELECT id FROM saves WHERE owner=? AND kind=? AND target=?',u.userId,kind,target);if(old)await stmt('DELETE FROM saves WHERE id=? AND owner=?',old.id,u.userId).run();else await stmt('INSERT INTO saves(id,owner,kind,target) VALUES(?,?,?,?)',uuid(),u.userId,kind,target).run();return json({saved:!old});}
@@ -221,11 +226,12 @@ async function handle(req:Request,method:string){try{
    if(b.kind==='place'){
     const v=await one("SELECT id FROM place_reviews WHERE id=? AND status!='deleted'",id);must(v,'Không tìm thấy đánh giá.');
     ops.push(stmt("UPDATE place_reviews SET status='deleted',reason=?,updated=? WHERE id=?",reason||'Admin đã xóa vi phạm',Date.now(),id));
+    replyMessage='Đã xóa bài đánh giá và khôi phục lại lượt đăng cho người dùng.';
    }else{
     const v=await one("SELECT id FROM reviews WHERE id=? AND status!='deleted'",id);must(v,'Không tìm thấy bài.');
     ops.push(stmt("UPDATE reviews SET status='deleted',reason=?,updated=? WHERE id=?",reason||'Admin đã xóa vi phạm',Date.now(),id));
+    replyMessage='Đã xóa bài đánh giá món.';
    }
-   replyMessage='Đã xóa bài đánh giá và khôi phục lại lượt đăng cho người dùng.';
   }
   else if(action==='banUser'){
    const targetUid=text(b.userId||b.googleUid||id,128).replace(/^firebase:/,'');
@@ -244,7 +250,7 @@ async function handle(req:Request,method:string){try{
   }
   else if(action==='blockIp'){
    const targetIp=text(b.ip,100);must(targetIp,'Địa chỉ IP không hợp lệ.');
-   ops.push(stmt("INSERT INTO blocked_ips(ip,reason,created) VALUES(?,?,?) ON CONFLICT(ip) DO UPDATE SET reason=excluded.reason",targetIp,text(reason||'Admin chặn IP vi phạm',250),Date.now()));
+   ops.push(stmt("INSERT INTO blocked_ips(ip,reason,created) VALUES(?,?,?) ON CONFLICT(ip) DO UPDATE SET reason=excluded.reason,created=excluded.created",targetIp,text(reason||'Admin chặn IP vi phạm',250),Date.now()));
    replyMessage='Đã chặn địa chỉ IP: '+targetIp;
   }
   else if(action==='unblockIp'){

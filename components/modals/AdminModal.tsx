@@ -38,7 +38,7 @@ function Admin({notify,refresh}:{notify:(s:string)=>void,refresh:()=>void}){
 
   return <>
     <p className="muted small">Chống seeding: tối đa 5 lượt gửi/sửa mỗi tài khoản trong 1 giờ. {d.networkDetection?.available?'Kiểm tra IP khả dụng: tối đa 3 lượt cho cùng quán trong 10 phút từ một IP.':'Chưa nhận được IP người dùng đáng tin cậy; giới hạn theo IP chưa áp dụng trên kết nối này. Vẫn kiểm tra tài khoản và nội dung.'}</p>
-    <StateNote>Duyệt bài cũng duyệt quán, loại món và món mới liên quan đang ở trạng thái chờ. Xóa cmt/bài viết sẽ tự động khôi phục lại 1 lượt đăng cho tài khoản đó ở quán tương ứng.</StateNote>
+    <StateNote>Duyệt bài cũng duyệt quán, loại món và món mới liên quan đang ở trạng thái chờ. Xóa mềm bài đánh giá quán sẽ hoàn lại 1 lượt trong giới hạn 10 bài/quán.</StateNote>
     {d.role==='superadmin'&&<>
       <a className="button secondary" href="/api/backup" target="_blank" rel="noreferrer">Tải bản sao dữ liệu hôm nay</a>
       <p className="muted small">Bản sao tự tạo sau thao tác ghi đầu tiên trong ngày, lưu riêng tư 30 ngày. Nên tải bản sao định kỳ ra nơi lưu trữ độc lập.</p>
@@ -51,7 +51,7 @@ function Admin({notify,refresh}:{notify:(s:string)=>void,refresh:()=>void}){
         ['reports','Báo cáo'],
         ['moderation','Chặn IP & Khóa tài khoản'],
         ['audit','Nhật ký']
-      ].filter(([key])=>d.role==='superadmin'||['queue','reports','moderation'].includes(key)).map(([v,t])=>(
+      ].filter(([key])=>d.role==='superadmin'||['queue','reports'].includes(key)).map(([v,t])=>(
         <button className={tab===v?'selected':''} onClick={()=>{T(v);E('')}} key={v}>{t}</button>
       ))}
     </div>
@@ -64,15 +64,17 @@ function Admin({notify,refresh}:{notify:(s:string)=>void,refresh:()=>void}){
         {JSON.parse(r.risk_flags||'[]').map((flag:string)=><p className="review-risk" key={flag}>{riskLabels[flag]||flag}</p>)}
         <h3>{r.kind==='place'?'Đánh giá địa điểm':r.dish} <small>{r.type_name?'· '+r.type_name:''}</small></h3>
         <p>{r.restaurant_name} · {r.address}, {r.district}, {r.city}</p>
-        <p><strong>{r.author}</strong> (ID: {r.owner}) · {date(r.date)} · {r.kind!=='place'?money(r.total)+' tổng · ':''}{r.rating}/5 {r.sponsored?'· Có tài trợ':''}</p>
+        <p><strong>{r.author}</strong>{d.role==='superadmin'&&r.owner?` (ID: ${r.owner})`:''} · {date(r.date)} · {r.kind!=='place'?money(r.total)+' tổng · ':''}{r.rating}/5 {r.sponsored?'· Có tài trợ':''}</p>
         <p className="preserve">{r.content||r.taste}</p>
         <p>{r.portion} {r.value}</p>
         <>{r.kind==='place'?<MediaGallery media={JSON.parse(r.media)}/>:<ImageGallery images={JSON.parse(r.photos)} alt="Ảnh cần duyệt"/>}</>
         <div className="actions" style={{flexWrap:'wrap',gap:'8px'}}>
           <button disabled={busy} className="button primary" onClick={()=>act({action:'approve',id:r.id,kind:r.kind})}><Check size={15}/> Duyệt công khai</button>
           <button disabled={busy} className="button secondary" onClick={()=>{const reason=prompt('Lý do ẩn bài (ít nhất 5 ký tự)');if(reason)act({action:'hide',id:r.id,kind:r.kind,reason})}}>Ẩn bài</button>
-          <button disabled={busy} className="button secondary" style={{color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>{const reason=prompt('Lý do xóa bài (sẽ khôi phục 1 lượt đăng quán này cho user):','Bài seeding vi phạm tiêu chuẩn');if(reason)act({action:'deleteReview',id:r.id,kind:r.kind,reason})}}><Trash2 size={14}/> Xóa bài (Khôi phục 1 lượt)</button>
-          {r.owner&&<button disabled={busy} className="button secondary" style={{color:'#991b1b',borderColor:'#fca5a5'}} onClick={()=>{const reason=prompt(`Khóa tài khoản ${r.author} (${r.owner})? Mọi phiên đăng nhập sẽ bị thu hồi:`, 'Spammer seeding');if(reason)act({action:'banUser',userId:r.owner,reason})}}><Ban size={14}/> Khóa tài khoản này</button>}
+          {d.role==='superadmin'&&<>
+            <button disabled={busy} className="button secondary" style={{color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>{const reason=prompt(r.kind==='place'?'Lý do xóa bài (sẽ khôi phục 1 lượt đăng quán này cho user):':'Lý do xóa bài đánh giá món:','Bài seeding vi phạm tiêu chuẩn');if(reason)act({action:'deleteReview',id:r.id,kind:r.kind,reason})}}><Trash2 size={14}/> {r.kind==='place'?'Xóa bài (Khôi phục 1 lượt)':'Xóa bài'}</button>
+            {r.owner&&<button disabled={busy} className="button secondary" style={{color:'#991b1b',borderColor:'#fca5a5'}} onClick={()=>{const reason=prompt(`Khóa tài khoản ${r.author} (${r.owner})? Mọi phiên đăng nhập sẽ bị thu hồi:`, 'Spammer seeding');if(reason)act({action:'banUser',userId:r.owner,reason})}}><Ban size={14}/> Khóa tài khoản này</button>}
+          </>}
         </div>
       </article>
     )):<p className="muted">Chưa có trải nghiệm cần duyệt.</p>)}

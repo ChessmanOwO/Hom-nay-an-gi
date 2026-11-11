@@ -16,7 +16,7 @@ for(const changes of [{aud:'another-project'},{aud:[project,'another']},{iss:'ht
 const bad=await token();await assert.rejects(verify(bad.slice(0,-16)+'AAAAAAAAAAAAAAAA'));await assert.rejects(verify('plain-text'));
 assert.equal(normalizeIp('::ffff:7f00:1'),'127.0.0.1');assert.equal(clientIp('198.51.100.1',new Headers({'X-Real-IP':'203.0.113.1'}),[]),'198.51.100.1');assert.equal(clientIp('127.0.0.1',new Headers({'X-Real-IP':'203.0.113.1'}),['127.0.0.1']),'203.0.113.1');assert.equal(clientIp('127.0.0.1',new Headers({'X-Real-IP':'203.0.113.1'}),[]),null);
 async function json(r:Response):Promise<any>{return r.json()}
-const dir=await mkdtemp(join(tmpdir(),'hnag-auth-')),db=new SqliteDatabase(join(dir,'app.sqlite'),resolve('drizzle')),bucket=new FileBucket(join(dir,'objects'));const origin='https://example.test';const app=createVpsApp({env:{DB:db,BUCKET:bucket,ADMIN_EMAILS:'admin@example.test'},origin,firebaseConfig:{projectId:project},verifyIdentity:verify});
+const dir=await mkdtemp(join(tmpdir(),'hnag-auth-')),db=new SqliteDatabase(join(dir,'app.sqlite'),resolve('drizzle')),bucket=new FileBucket(join(dir,'objects'));const origin='https://example.test';const app=createVpsApp({env:{DB:db,BUCKET:bucket,ADMIN_EMAILS:'admin@example.test',MODERATOR_EMAILS:'mod@example.test'},origin,firebaseConfig:{projectId:project},verifyIdentity:verify,trustedProxyIps:['127.0.0.1']});
 async function request(path:string,method='GET',body?:any,cookie?:string,reqOrigin=origin){return app.request(origin+path,{method,headers:{...(method!=='GET'?{Origin:reqOrigin,'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)})}
 try{
  assert.throws(()=>createVpsApp({env:{DB:db},origin:'http://example.test',firebaseConfig:{projectId:project}}));
@@ -41,7 +41,23 @@ try{
  const other=await request('/api/auth/session','POST',{idToken:await token({sub:'other-user',email:'other@example.test'})});const otherCookie=other.headers.get('Set-Cookie')!.split(';')[0];
  assert.equal((await request('/api/place-reviews','PATCH',{...reviewBody,id:review.id},otherCookie)).status,400);assert.equal((await request('/api/place-reviews','DELETE',{id:review.id},otherCookie)).status,400);
  const adminCookie=admin.headers.get('Set-Cookie')!.split(';')[0];assert.equal((await request('/api/admin','POST',{action:'approve',kind:'place',id:review.id},adminCookie)).status,200);
- assert.equal((await json(await request('/api/place/auth-test-place'))).total,1);const picture=await request('/api/photo/'+photoId);assert.equal(picture.status,200);assert.equal(picture.headers.get('content-type'),'image/jpeg');assert((await picture.arrayBuffer()).byteLength>100);
+ const pubPlace=await json(await request('/api/place/auth-test-place'));assert.equal(pubPlace.total,1);assert.equal(pubPlace.reviews[0].owner,undefined);
+ const mod=await request('/api/auth/session','POST',{idToken:await token({sub:'mod-user',email:'mod@example.test'})});const modCookie=mod.headers.get('Set-Cookie')!.split(';')[0];
+ const modAdmin=await json(await request('/api/admin','GET',undefined,modCookie));assert.equal(modAdmin.role,'moderator');assert.equal(modAdmin.placeQueue[0].owner,undefined);assert.equal(modAdmin.blockedIps.length,0);
+ assert.equal((await json(await request('/api/place/auth-test-place','GET',undefined,modCookie))).reviews[0].owner,undefined);
+ for(const forbidden of [{action:'deleteReview',kind:'place',id:review.id},{action:'banUser',userId:'test-google-user'},{action:'blockIp',ip:'203.0.113.55'}])assert.equal((await request('/api/admin','POST',forbidden,modCookie)).status,403);
+ assert.equal((await json(await request('/api/place/auth-test-place','GET',undefined,adminCookie))).reviews[0].owner,'firebase:test-google-user');
+ assert.equal((await request('/api/admin','POST',{action:'blockIp',ip:'203.0.113.55',reason:'Spam network'},adminCookie)).status,200);
+ assert.equal((await json(await request('/api/admin','GET',undefined,adminCookie))).blockedIps[0].ip,'203.0.113.55');
+ const edgeApp=app;
+ // Verify IP block enforcement directly through the handler header after superadmin blockIp.
+ const {createApi:makeApi}=await import('../lib/api-handler');
+ const directApi=makeApi({env:{DB:db,ADMIN_EMAILS:'admin@example.test'},getUser:async()=>null});
+ assert.equal((await directApi(new Request(origin+'/api/state',{headers:{'x-hnag-client-ip':'203.0.113.55'}}))).status,403);
+ assert.equal((await request('/api/admin','POST',{action:'unblockIp',ip:'203.0.113.55'},adminCookie)).status,200);
+ assert.equal((await directApi(new Request(origin+'/api/state',{headers:{'x-hnag-client-ip':'203.0.113.55'}}))).status,200);
+ void edgeApp;
+ const picture=await request('/api/photo/'+photoId);assert.equal(picture.status,200);assert.equal(picture.headers.get('content-type'),'image/jpeg');assert((await picture.arrayBuffer()).byteLength>100);
  assert.equal((await request('/api/helpful','POST',{id:review.id},otherCookie)).status,200);assert.equal((await request('/api/place-reviews','DELETE',{id:review.id},cookie2)).status,200);assert.equal((await request('/api/photo/'+photoId)).status,403);
  assert.equal((await json(await request('/api/state'))).eligibleTypes,0);
  // A browser-provided UID/role cannot change the signed identity.

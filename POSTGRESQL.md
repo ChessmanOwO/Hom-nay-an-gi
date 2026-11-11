@@ -16,7 +16,7 @@ Dừng mọi tiến trình ghi của bản SQLite và sao lưu database cùng th
 
 node --env-file=.env.vps scripts/import-sqlite.mjs /absolute/path/to/app.sqlite
 
-Công cụ yêu cầu đích chưa có dữ liệu ứng dụng, nhập trong một transaction và rollback khi lỗi. Nguồn mở read-only. Các bài pending/hidden/deleted đều được giữ, trigger đếm vào quota 10. Copy thư mục objects sang DATA_DIR/objects riêng, giữ nguyên tên tệp. Xác minh tổng số bản ghi và ảnh trước khi cho người dùng ghi vào bản mới. Không tự chuyển dữ liệu đang chạy của máy người dùng.
+Công cụ yêu cầu đích chưa có dữ liệu ứng dụng, nhập trong một transaction và rollback khi lỗi. Nguồn mở read-only. Các bài pending/hidden được tính vào giới hạn 10 bài/quán; bài `deleted` được khôi phục lượt theo `002_restore_place_review_quota.sql`, còn `003_blocked_ips.sql` tạo bảng chặn IP đồng bộ với SQLite. Copy thư mục objects sang DATA_DIR/objects riêng, giữ nguyên tên tệp. Xác minh tổng số bản ghi và ảnh trước khi cho người dùng ghi vào bản mới. Không tự chuyển dữ liệu đang chạy của máy người dùng.
 
 ## Thu hồi tài khoản
 

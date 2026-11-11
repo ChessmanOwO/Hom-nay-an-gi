@@ -8,7 +8,7 @@ export function getAdminRole(user: { email: string } | null, config: { ADMIN_EMA
   return null;
 }
 export function canAdminAction(role: AdminRole, action: string): boolean {
-  const moderation = ['approve', 'hide', 'resolve', 'deleteReview', 'banUser', 'unbanUser', 'blockIp', 'unblockIp'];
-  const technical = ['restaurant', 'type', 'mergeType', 'mergeRestaurant'];
-  return role === 'superadmin' ? [...moderation, ...technical].includes(action) : role === 'moderator' && moderation.includes(action);
+  const moderation = ['approve', 'hide', 'resolve'];
+  const superAdminOnly = ['deleteReview', 'banUser', 'unbanUser', 'blockIp', 'unblockIp', 'restaurant', 'type', 'mergeType', 'mergeRestaurant'];
+  return role === 'superadmin' ? [...moderation, ...superAdminOnly].includes(action) : role === 'moderator' && moderation.includes(action);
 }
