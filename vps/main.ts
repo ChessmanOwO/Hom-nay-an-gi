@@ -6,10 +6,28 @@ import {fileURLToPath} from 'node:url';
 import {FileBucket} from './storage';
 import {createVpsApp} from './app';
 import firebaseConfig from '../config/firebase-web.json';
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled Promise Rejection:', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught Exception:', error);
+  process.exit(1);
+});
+
 const dir=dirname(fileURLToPath(import.meta.url)),data=resolve(process.env.DATA_DIR||'vps/data'),origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
 if(process.env.FIREBASE_PROJECT_ID&&process.env.FIREBASE_PROJECT_ID!==firebaseConfig.projectId)throw Error('FIREBASE_PROJECT_ID does not match the registered web app');
 const db=new PostgresDatabase(process.env.DATABASE_URL||'',Number(process.env.PG_POOL_MAX||10));
-await db.migrate(join(dir,'postgres'));
+
+for (let attempt = 1; attempt <= 10; attempt++) {
+  try {
+    await db.migrate(join(dir, 'postgres'));
+    break;
+  } catch (error) {
+    console.warn(`[DB] Migration attempt ${attempt}/10 failed: ${(error as Error).message}. Retrying in 2s...`);
+    if (attempt === 10) throw error;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
 const bucket=new FileBucket(join(data,'objects'));
 function snapshotJob(): Promise<void> {
   return new Promise((resolve, reject) => {

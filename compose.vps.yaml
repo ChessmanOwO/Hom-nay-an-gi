@@ -27,6 +27,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - private_app
   postgres:
@@ -43,6 +48,11 @@ services:
       timeout: 5s
       retries: 15
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - private_app
 volumes:
