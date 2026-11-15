@@ -27,7 +27,7 @@ export async function placeWrite(method:string,b:any,u:any,{one,stmt,db,must,tex
  must(Number.isInteger(rating)&&rating>=1&&rating<=5,'Chọn điểm từ 1 đến 5.');must(content.length>=30,'Kể cụ thể trải nghiệm của bạn, ít nhất 30 ký tự.');
  must(Array.isArray(ids)&&ids.length<=5&&new Set(ids).size===ids.length,'Tối đa 5 ảnh khác nhau.');const media=[];let photos=0;
  for(const id of ids){must(typeof id==='string'&&id.length<=100,'Ảnh không hợp lệ.');const p=await one('SELECT id,mime FROM photos WHERE id=? AND owner=?',id,u.userId);must(p,'Ảnh không thuộc tài khoản của bạn.');must(['image/jpeg','image/png'].includes(p.mime),'Định dạng không hỗ trợ.');photos++;media.push({id:p.id,kind:'image'});}
- const reviewId=old?.id||uuid();await checkAbuse({owner:u.userId,restaurant,target:reviewId,content});
+ const reviewId=old?.id||uuid();await checkAbuse({owner:u.userId,restaurant,target:reviewId,content,photos:ids});
  if(old){await stmt("UPDATE place_reviews SET author=?,date=?,rating=?,content=?,media=?,photo_count=?,sponsored=?,status='pending',reason='',updated=? WHERE id=? AND owner=?",trimmedAuthor,date,rating,content,JSON.stringify(media),photos,b.sponsored?1:0,now,id,u.userId).run();}
  else{await stmt('INSERT INTO place_reviews(id,restaurant,owner,author,date,rating,content,media,photo_count,sponsored,status,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',reviewId,restaurant,u.userId,trimmedAuthor,date,rating,content,JSON.stringify(media),photos,b.sponsored?1:0,'pending','',now,now).run();}
  return json({message:'Đã gửi đánh giá quán để duyệt. Ảnh không đồng nghĩa với đã xác minh.'});

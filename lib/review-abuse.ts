@@ -12,11 +12,19 @@ export function trustedClientIp(req:Request&{cf?:{colo?:unknown}}):string|null{
 }
 export function similarity(a:string,b:string){const x=new Set(canonical(a).split(' ').filter(Boolean)),y=new Set(canonical(b).split(' ').filter(Boolean));if(x.size<12||y.size<12)return 0;let n=0;for(const w of x)if(y.has(w))n++;return n/(x.size+y.size-n)}
 export function duplicateKind(content:string,other:string):'exact'|'similar'|null{const a=canonical(content),b=canonical(other);if(a.length>=20&&a===b)return 'exact';return a.length>=80&&b.length>=80&&similarity(a,b)>=ABUSE.similarity?'similar':null}
-export const abuseLabels:Record<string,string>={shared_network:'Nhiều tài khoản cùng mạng đánh giá quán trong 10 phút',similar_text:'Nội dung gần giống bài khác tại quán',network_unavailable:'Chưa có IP người dùng đáng tin cậy; chỉ áp dụng kiểm tra tài khoản/nội dung'};
-export async function reviewAbuse({owner,restaurant,target,content,ip}:{owner:string,restaurant:string,target:string,content:string,ip:string|null},{one,all,stmt,must}:any){
+export const abuseLabels:Record<string,string>={shared_network:'Nhiều tài khoản cùng mạng đánh giá quán trong 10 phút',similar_text:'Nội dung gần giống bài khác tại quán',reused_photo:'Ảnh này đã từng được dùng cho quán khác (nghi vấn ảnh mạng / seeding chéo)',network_unavailable:'Chưa có IP người dùng đáng tin cậy; chỉ áp dụng kiểm tra tài khoản/nội dung'};
+export async function reviewAbuse({owner,restaurant,target,content,ip,photos=[]}:{owner:string,restaurant:string,target:string,content:string,ip:string|null,photos?:string[]},{one,all,stmt,must}:any){
  const now=Date.now(),flags:string[]=[];
  const previous=await all(`SELECT owner,taste content,updated FROM reviews WHERE offering IN (SELECT id FROM offerings WHERE restaurant=?) AND owner!=? AND updated>? UNION ALL SELECT owner,content,updated FROM place_reviews WHERE restaurant=? AND owner!=? AND updated>? ORDER BY updated DESC LIMIT 100`,restaurant,owner,now-30*86400000,restaurant,owner,now-30*86400000);
  for(const p of previous){const match=duplicateKind(content,p.content);must(match!=='exact','Nội dung này đã được tài khoản khác gửi cho quán. Hãy viết trải nghiệm riêng của bạn.');if(match==='similar'&&!flags.includes('similar_text'))flags.push('similar_text');}
+ if(Array.isArray(photos)&&photos.length>0){
+  for(const pid of photos){
+   if(typeof pid==='string'&&pid.length>0){
+    const other=await one("SELECT v.id FROM reviews v JOIN offerings o ON o.id=v.offering WHERE o.restaurant!=? AND v.photos LIKE ? AND v.status!='deleted' LIMIT 1",restaurant,'%"'+pid+'"%')||await one("SELECT p.id FROM place_reviews p WHERE p.restaurant!=? AND p.media LIKE ? AND p.status!='deleted' LIMIT 1",restaurant,'%"'+pid+'"%');
+    if(other){if(!flags.includes('reused_photo'))flags.push('reused_photo');break;}
+   }
+  }
+ }
  let network='';if(ip){await stmt("INSERT OR IGNORE INTO abuse_config(key,value) VALUES('network_hmac',?)",crypto.randomUUID()+crypto.randomUUID()).run();const config=await one("SELECT value FROM abuse_config WHERE key='network_hmac'");const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(config.value),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(ip)));network=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
   const peers=await one('SELECT COUNT(DISTINCT owner) n FROM review_events WHERE network=? AND restaurant=? AND owner!=? AND created>?',network,restaurant,owner,now-ABUSE.networkWindow);if(peers.n>0)flags.push('shared_network');
  }else flags.push('network_unavailable');

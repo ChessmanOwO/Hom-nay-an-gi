@@ -3,7 +3,7 @@ import {useEffect,useState} from 'react';
 import {Soup,Check,LoaderCircle,CheckCircle2,Info,Trash2,Ban,UserX,ShieldCheck} from 'lucide-react';
 import ImageGallery from '../ImageGallery';
 import MediaGallery from '../MediaGallery';
-const riskLabels:Record<string,string>={shared_network:'Nhiều tài khoản cùng mạng đánh giá quán trong 10 phút',similar_text:'Nội dung gần giống bài khác tại quán',network_unavailable:'Chưa có IP đáng tin cậy: chỉ kiểm tra tài khoản và nội dung'};
+const riskLabels:Record<string,string>={shared_network:'Nhiều tài khoản cùng mạng đánh giá quán trong 10 phút',similar_text:'Nội dung gần giống bài khác tại quán',reused_photo:'⚠️ Ảnh này đã từng được dùng cho quán khác (nghi vấn ảnh mạng / seeding chéo)',network_unavailable:'Chưa có IP đáng tin cậy: chỉ kiểm tra tài khoản và nội dung'};
 import Modal from './Modal';
 import {Field,StateNote} from '../FormControls';
 import {api,money,unit,photo,date} from '../../lib/client';
@@ -68,6 +68,13 @@ function Admin({notify,refresh}:{notify:(s:string)=>void,refresh:()=>void}){
         <p className="preserve">{r.content||r.taste}</p>
         <p>{r.portion} {r.value}</p>
         <>{r.kind==='place'?<MediaGallery media={JSON.parse(r.media)}/>:<ImageGallery images={JSON.parse(r.photos)} alt="Ảnh cần duyệt"/>}</>
+        <div style={{display:'flex',gap:'6px',flexWrap:'wrap',margin:'6px 0 10px'}}>
+          {((r.kind==='place'?JSON.parse(r.media||'[]').map((m:any)=>m.id):JSON.parse(r.photos||'[]')) as string[]).map((pid:string,idx:number)=>(
+            <a key={pid} href={`https://lens.google.com/uploadbyurl?url=${encodeURIComponent(typeof window!=='undefined'?(window.location.origin+'/api/photo/'+pid):'')}`} target="_blank" rel="noreferrer" className="button secondary" style={{fontSize:'12px',padding:'3px 8px',display:'inline-flex',alignItems:'center',gap:'4px',borderColor:'#cbd5e1',background:'#f8fafc',textDecoration:'none'}} title="Tra cứu nguồn ảnh trên Google Lens để phát hiện ảnh mạng, Foody, ShopeeFood, Pinterest">
+              🔍 Soi nguồn ảnh #{idx+1} (Google Lens)
+            </a>
+          ))}
+        </div>
         <div className="actions" style={{flexWrap:'wrap',gap:'8px'}}>
           <button disabled={busy} className="button primary" onClick={()=>act({action:'approve',id:r.id,kind:r.kind})}><Check size={15}/> Duyệt công khai</button>
           <button disabled={busy} className="button secondary" onClick={()=>{const reason=prompt('Lý do ẩn bài (ít nhất 5 ký tự)');if(reason)act({action:'hide',id:r.id,kind:r.kind,reason})}}>Ẩn bài</button>
