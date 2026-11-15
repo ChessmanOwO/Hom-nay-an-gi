@@ -139,7 +139,12 @@ async function handle(req:Request,method:string){try{
    const q='%'+text(url.searchParams.get('q'),100)+'%';
    return json({types:await all("SELECT id,name FROM food_types WHERE status='approved' ORDER BY name LIMIT 200"),restaurants:await all("SELECT id,name,address,city,district,lat,lng,hours FROM restaurants WHERE status='active' AND (name LIKE ? OR address LIKE ? OR city LIKE ?) ORDER BY name LIMIT 200",q,q,q)});
   }
-  if(path[0]==='mine'){
+     if(path[0]==='profile'){
+    if(!u)return json({error:'Bạn cần đăng nhập.'},401);
+    const profile=await one('SELECT id,email,display_name,created,last_login FROM app_users WHERE id=? OR google_uid=?',u.userId,u.userId.replace(/^firebase:/,''));
+    return json({user:{id:u.userId,name:profile?.display_name||u.fullName||'Thành viên',email:profile?.email||u.email,created:profile?.created||null,admin,role}});
+   }
+if(path[0]==='mine'){
    if(!u)return json({error:'Bạn cần đăng nhập.'},401);
    return json({placeReviews:await all('SELECT v.*,r.name restaurant_name FROM place_reviews v JOIN restaurants r ON r.id=v.restaurant WHERE v.owner=? ORDER BY v.updated DESC',u.userId),reviews:await all('SELECT v.*,o.name dish,r.name restaurant_name FROM reviews v JOIN offerings o ON o.id=v.offering JOIN restaurants r ON r.id=o.restaurant WHERE v.owner=? ORDER BY v.updated DESC',u.userId)});
   }
@@ -177,7 +182,19 @@ async function handle(req:Request,method:string){try{
   await limit(u.userId,'upload',20);must(Number(req.headers.get('content-length')||0)<=3_000_000,'Ảnh quá lớn.');const b=await readLimited(req,3_000_000);const img=cleanImage(b),id=uuid();must(env.BUCKET,'Kho ảnh chưa được kết nối.');await env.BUCKET!.put(id,img.data,{httpMetadata:{contentType:img.mime}});await stmt('INSERT INTO photos(id,owner,mime,created) VALUES(?,?,?,?)',id,u.userId,img.mime,Date.now()).run();return json({id});
  }
  must(Number(req.headers.get('content-length')||0)<40000,'Dữ liệu quá lớn.');const b:any=JSON.parse(new TextDecoder().decode(await readLimited(req,40000)));await limit(u.userId,'write',35);
- if(path[0]==='resolve-maps'){
+   if(path[0]==='profile'&&method==='PATCH'){
+   const name=text(b.name,60);
+   must(name.length>=2,'Tên hiển thị phải có ít nhất 2 ký tự.');
+   must(name.length<=50,'Tên hiển thị tối đa 50 ký tự.');
+   const googleUid=u.userId.replace(/^firebase:/,'');
+   await db().batch([
+    stmt('UPDATE app_users SET display_name=? WHERE id=? OR google_uid=?',name,u.userId,googleUid),
+    stmt('UPDATE reviews SET author=? WHERE owner=?',name,u.userId),
+    stmt('UPDATE place_reviews SET author=? WHERE owner=?',name,u.userId)
+   ]);
+   return json({ok:true,name,message:'Đã cập nhật tên hiển thị thành công!'});
+  }
+  if(path[0]==='resolve-maps'){
   const rawUrl=text(b.url,2000);must(rawUrl,'Vui lòng nhập liên kết Google Maps.');
   try{
    let target=rawUrl;
